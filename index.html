@@ -1,0 +1,3100 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#020617">
+  <meta name="description" content="Deutsch Turbo – مصحح ومساعد تعلّم الألمانية بالذكاء الاصطناعي">
+  <title>مصحح الألمانية الطلقة | Deutsch Turbo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { margin: 0; min-height: 100vh; background: #020617; color: #f8fafc; }
+    #root { min-height: 100vh; }
+  </style>
+  <!-- Browser ESM imports allow deploying this entire app as a single index.html on GitHub Pages. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.3.1",
+      "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?external=react",
+      "lucide-react": "https://esm.sh/lucide-react@0.468.0?external=react",
+      "firebase/app": "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js",
+      "firebase/auth": "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js",
+      "firebase/firestore": "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="root"><p style="padding:1.5rem;font-family:system-ui,sans-serif">جاري تحميل التطبيق...</p></div>
+  <script type="module">
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Square,
+  Key,
+  ExternalLink,
+  CheckCircle2,
+  XCircle,
+  Languages,
+  Loader2,
+  Zap,
+  RotateCcw,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  Check,
+  Clock,
+  Radio,
+  MessageSquarePlus,
+  Trash2,
+  X,
+  Eye,
+  EyeOff,
+  Globe,
+  Copy,
+  Bookmark,
+  BookOpen,
+  Award,
+  ClipboardPaste,
+  Search,
+  Cloud,
+  Download,
+  Layers
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from 'firebase/firestore';
+
+// ==========================================
+// إعداد التخزين السحابي الدائم (إن وجد) أو التخزين المحلي على GitHub Pages
+// ==========================================
+const firebaseConfig = typeof __firebase_config !== "undefined" && __firebase_config
+    ? JSON.parse(__firebase_config)
+    : null;
+const app = firebaseConfig ? initializeApp(firebaseConfig) : null;
+const auth = app ? getAuth(app) : null;
+const db = app ? getFirestore(app) : null;
+const appId = typeof __app_id !== "undefined" && __app_id ? __app_id : "deutsch-turbo-app";
+
+// ==========================================
+// إعدادات مفتاح الـ API والتخزين الثلاثي الدائم 100% (LocalStorage + SessionStorage + Cookies)
+// لكي لا يضيع المفتاح أبداً عند عمل Refresh للصفحة
+// ==========================================
+const API_KEY_STORAGE_NAME = "deutsch_turbo_api_key_v3";
+const API_KEY_ALT_NAME = "deutsch_turbo_gemini_api_key";
+const LEGACY_KEY_STORAGE_NAME = "deutsch-turbo-api-key";
+const ACTIVE_MODEL_STORAGE_NAME = "deutsch_turbo_active_model";
+
+const sanitizeApiKey = (raw) => {
+    if (!raw || typeof raw !== "string") return "";
+    return raw.trim().replace(/[\s"'`]+/g, "");
+};
+
+const readCookieValue = (name) => {
+    try {
+        const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+        if (match && match[2]) return decodeURIComponent(match[2]);
+    } catch (_) {}
+    return "";
+};
+
+const writeCookieValue = (name, val) => {
+    try {
+        if (val) {
+            document.cookie = `${name}=${encodeURIComponent(val)}; max-age=31536000; path=/; SameSite=Lax`;
+        } else {
+            document.cookie = `${name}=; max-age=0; path=/; SameSite=Lax`;
+        }
+    } catch (_) {}
+};
+
+const readStoredApiKey = () => {
+    try {
+        const candidates = [
+            window.localStorage?.getItem(API_KEY_STORAGE_NAME),
+            window.localStorage?.getItem(API_KEY_ALT_NAME),
+            window.localStorage?.getItem(LEGACY_KEY_STORAGE_NAME),
+            window.sessionStorage?.getItem(API_KEY_STORAGE_NAME),
+            readCookieValue(API_KEY_STORAGE_NAME)
+        ];
+        for (const c of candidates) {
+            const cleaned = sanitizeApiKey(c);
+            if (cleaned && cleaned.length >= 10) return cleaned;
+        }
+    } catch (_) {}
+    const cookieFallback = sanitizeApiKey(readCookieValue(API_KEY_STORAGE_NAME));
+    return cookieFallback.length >= 10 ? cookieFallback : "";
+};
+
+const writeStoredApiKey = (rawKey) => {
+    const cleanKey = sanitizeApiKey(rawKey);
+    try {
+        if (cleanKey) {
+            window.localStorage?.setItem(API_KEY_STORAGE_NAME, cleanKey);
+            window.localStorage?.setItem(API_KEY_ALT_NAME, cleanKey);
+            window.localStorage?.setItem(LEGACY_KEY_STORAGE_NAME, cleanKey);
+            window.sessionStorage?.setItem(API_KEY_STORAGE_NAME, cleanKey);
+        } else {
+            window.localStorage?.removeItem(API_KEY_STORAGE_NAME);
+            window.localStorage?.removeItem(API_KEY_ALT_NAME);
+            window.localStorage?.removeItem(LEGACY_KEY_STORAGE_NAME);
+            window.sessionStorage?.removeItem(API_KEY_STORAGE_NAME);
+        }
+    } catch (_) {}
+    writeCookieValue(API_KEY_STORAGE_NAME, cleanKey);
+};
+
+const readStoredActiveModel = () => {
+    try {
+        return window.localStorage?.getItem(ACTIVE_MODEL_STORAGE_NAME) || "gemini-3.5-flash-lite";
+    } catch (_) {
+        return "gemini-3.5-flash-lite";
+    }
+};
+
+const writeStoredActiveModel = (modelName) => {
+    if (!modelName) return;
+    try {
+        window.localStorage?.setItem(ACTIVE_MODEL_STORAGE_NAME, modelName);
+    } catch (_) {}
+};
+
+// تنظيف الموديل المحفوظ إذا كان قديماً (مثل 1.5 أو 2.0 أو 2.5 الذي أوقفته جوجل للمستخدمين الجدد)
+const getInitialModel = () => {
+    const saved = readStoredActiveModel();
+    if (!saved || saved.includes("1.5") || saved.includes("2.0") || saved.includes("2.5")) {
+        return "gemini-3.5-flash-lite";
+    }
+    return saved;
+};
+
+// قائمة الموديلات الحديثة المعتمدة مرتبة حسب الأحدث (3.5 ثم latest ثم 3.1/3.0)
+let discoveredModelsCache = [
+    getInitialModel(),
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-flash-lite-latest",
+    "gemini-flash-latest",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash",
+    "gemini-3-flash-preview"
+].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+
+// استعلام فعلي من سيرفر جوجل لجلب الموديلات المتاحة لمفتاح المستخدم واختبار التوليد الحقيقي
+async function verifyApiKeyWithGoogle(cleanKey) {
+    if (!cleanKey || cleanKey.length < 15) {
+        throw new Error("INVALID_KEY: المفتاح قصير جداً أو غير مكتمل.");
+    }
+
+    // 1. الموديلات الحديثة المعتمدة للمستخدمين الجدد في Google AI Studio
+    let candidateModels = [
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-flash-lite-latest",
+        "gemini-flash-latest",
+        "gemini-3.1-flash-lite",
+        "gemini-3.1-flash",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash"
+    ];
+
+    try {
+        const listRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`
+        );
+        if (!listRes.ok) {
+            let errJson = null;
+            try { errJson = await listRes.json(); } catch (_) {}
+            const msg = errJson?.error?.message || `HTTP ${listRes.status}`;
+            if (listRes.status === 400 || /API key not valid|API_KEY_INVALID/i.test(msg)) {
+                throw new Error(`INVALID_KEY: ${msg}`);
+            }
+            if (listRes.status === 403) {
+                throw new Error(`FORBIDDEN_KEY: ${msg}`);
+            }
+        } else {
+            const listData = await listRes.json();
+            if (Array.isArray(listData?.models)) {
+                const availableNames = listData.models
+                    .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes("generateContent"))
+                    .map((m) => (m.name || "").replace(/^models\//, ""))
+                    .filter((name) => name.startsWith("gemini-") && !name.includes("tts") && !name.includes("image") && !name.includes("embedding") && !name.includes("vision"));
+
+                const preferredOrder = [
+                    "gemini-3.5-flash-lite",
+                    "gemini-3.5-flash",
+                    "gemini-3.5-flash-lite-preview",
+                    "gemini-3.5-flash-preview",
+                    "gemini-flash-lite-latest",
+                    "gemini-flash-latest",
+                    "gemini-3.1-flash-lite",
+                    "gemini-3.1-flash",
+                    "gemini-3-flash-preview",
+                    "gemini-3.5-pro",
+                    "gemini-2.5-flash",
+                    "gemini-2.5-flash-lite"
+                ];
+
+                const prioritized = preferredOrder.filter((p) => availableNames.includes(p));
+                const others3x = availableNames.filter((a) => (a.includes("3.5") || a.includes("3.1") || a.includes("latest")) && !prioritized.includes(a));
+                const othersRest = availableNames.filter((a) => a.includes("flash") && !prioritized.includes(a) && !others3x.includes(a));
+                const combined = [...prioritized, ...others3x, ...othersRest];
+                if (combined.length > 0) {
+                    candidateModels = [
+                        "gemini-3.5-flash-lite",
+                        ...combined.filter((m) => m !== "gemini-3.5-flash-lite")
+                    ];
+                }
+            }
+        }
+    } catch (err) {
+        if (err.message?.startsWith("INVALID_KEY:") || err.message?.startsWith("FORBIDDEN_KEY:")) {
+            throw err;
+        }
+    }
+
+    // 2. اختبار توليد حقيقي مع التقاط أي موديل تقترحه جوجل تلقائياً في رسالة الخطأ
+    let lastError = null;
+    const queue = [...candidateModels];
+    const testedSet = new Set();
+
+    while (queue.length > 0 && testedSet.size < 8) {
+        const modelName = queue.shift();
+        if (!modelName || testedSet.has(modelName)) continue;
+        testedSet.add(modelName);
+
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+            const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: [{ role: "user", parts: [{ text: "Reply with one word: OK" }] }],
+                    generationConfig: {
+                        maxOutputTokens: 10,
+                        temperature: 0
+                    }
+                })
+            });
+
+            if (!res.ok) {
+                let errJson = null;
+                try { errJson = await res.json(); } catch (_) {}
+                const msg = errJson?.error?.message || `HTTP ${res.status}`;
+                if (res.status === 400 && /API key not valid|API_KEY_INVALID/i.test(msg)) {
+                    throw new Error(`INVALID_KEY: ${msg}`);
+                }
+                if (res.status === 403) {
+                    throw new Error(`FORBIDDEN_KEY: ${msg}`);
+                }
+                // إذا اقترحت جوجل موديل بديل في رسالة الخطأ (مثل models/gemini-3.5-flash-lite) نضعه في أول الطابور فوراً!
+                const suggestedMatch = msg.match(/models\/(gemini-[a-zA-Z0-9._-]+)/i);
+                if (suggestedMatch && suggestedMatch[1] && !testedSet.has(suggestedMatch[1])) {
+                    queue.unshift(suggestedMatch[1]);
+                }
+                lastError = new Error(`${modelName}: ${msg}`);
+                continue;
+            }
+
+            const data = await res.json();
+            const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (replyText) {
+                writeStoredActiveModel(modelName);
+                discoveredModelsCache = [
+                    modelName,
+                    ...candidateModels.filter((m) => m !== modelName)
+                ];
+                return modelName;
+            }
+        } catch (err) {
+            if (err.message?.startsWith("INVALID_KEY:") || err.message?.startsWith("FORBIDDEN_KEY:")) {
+                throw err;
+            }
+            lastError = err;
+        }
+    }
+
+    throw lastError || new Error("تعذر الاتصال بأي موديل Gemini متاح على هذا المفتاح.");
+}
+
+// استخراج JSON بأمان تام من رد الذكاء الاصطناعي حتى لو أرسل علامات markdown
+function parseJsonSafely(rawText) {
+    if (!rawText) throw new Error("Empty AI text");
+    const cleaned = rawText
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+    try {
+        return JSON.parse(cleaned);
+    } catch (_) {
+        const match = rawText.match(/\{[\s\S]*\}/);
+        if (match) {
+            return JSON.parse(match[0]);
+        }
+        throw new Error("Invalid JSON format from AI");
+    }
+}
+
+// ==========================================
+// محرك الاتصال الحقيقي والموثوق بـ Gemini API
+// ==========================================
+async function callGeminiAPI({
+    activeKey,
+    userText,
+    systemPrompt,
+    temperature = 0.1,
+    signal
+}) {
+    const cleanKey = sanitizeApiKey(activeKey || readStoredApiKey());
+
+    // دعم العمل بمفتاح المستخدم على GitHub Pages مع البدء بموديل gemini-3.5-flash-lite الحديث
+    const initialModelsList = cleanKey
+        ? [
+            getInitialModel(),
+            ...discoveredModelsCache,
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-flash-lite-latest",
+            "gemini-flash-latest",
+            "gemini-3.1-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash"
+          ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i)
+        : ["gemini-3.5-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash"];
+
+    const queue = [...initialModelsList];
+    const triedModels = new Set();
+    let lastError = null;
+
+    while (queue.length > 0 && triedModels.size < 8) {
+        const modelName = queue.shift();
+        if (!modelName || triedModels.has(modelName)) continue;
+        triedModels.add(modelName);
+
+        try {
+            const payload = {
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+                contents: [
+                    {
+                        role: "user",
+                        parts: [{ text: userText }]
+                    }
+                ],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    temperature
+                }
+            };
+
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+            let response = await fetch(apiUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+                signal
+            });
+
+            // إذا رفض الموديل خاصية responseMimeType، نعيد المحاولة بطلب نصي قياسي متوافق 100%
+            if (response.status === 400) {
+                let errCheck = null;
+                try { errCheck = await response.json(); } catch (_) {}
+                const errMsg = errCheck?.error?.message || "";
+                if (/API key not valid|API_KEY_INVALID/i.test(errMsg)) {
+                    throw new Error(`INVALID_KEY: ${errMsg}`);
+                }
+                // فحص إن كان الخطأ بسبب إيقاف الموديل واقتراح موديل أحدث مثل gemini-3.5-flash-lite
+                const suggestedIn400 = errMsg.match(/models\/(gemini-[a-zA-Z0-9._-]+)/i);
+                if (suggestedIn400 && suggestedIn400[1] && !triedModels.has(suggestedIn400[1])) {
+                    queue.unshift(suggestedIn400[1]);
+                    throw new Error(`MODEL_DEPRECATED: ${errMsg}`);
+                }
+                const fallbackPayload = {
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [{ text: `${systemPrompt}\n\nالنص المطلوب معالجته:\n${userText}\n\nأرجع JSON صالح فقط بدون أي كلام خارجه.` }]
+                        }
+                    ],
+                    generationConfig: { temperature }
+                };
+                response = await fetch(apiUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(fallbackPayload),
+                    signal
+                });
+            }
+
+            if (!response.ok) {
+                let errData = null;
+                try { errData = await response.json(); } catch (_) {}
+                const apiErrMsg = errData?.error?.message || `HTTP ${response.status}`;
+
+                if (response.status === 400 && /API key not valid|API_KEY_INVALID/i.test(apiErrMsg)) {
+                    throw new Error(`INVALID_KEY: ${apiErrMsg}`);
+                }
+                if (response.status === 403) {
+                    throw new Error(`FORBIDDEN_KEY: ${apiErrMsg}`);
+                }
+                if (!cleanKey && (response.status === 400 || response.status === 401 || response.status === 403)) {
+                    throw new Error("NO_API_KEY");
+                }
+                // إذا اقترح السيرفر موديل بديل في رسالة الخطأ، نضعه في بداية الطابور فوراً
+                const suggestedModel = apiErrMsg.match(/models\/(gemini-[a-zA-Z0-9._-]+)/i);
+                if (suggestedModel && suggestedModel[1] && !triedModels.has(suggestedModel[1])) {
+                    queue.unshift(suggestedModel[1]);
+                }
+                throw new Error(`MODEL_${modelName}_${response.status}: ${apiErrMsg}`);
+            }
+
+            const data = await response.json();
+            const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!rawText) {
+                throw new Error("EMPTY_CANDIDATE");
+            }
+
+            const parsed = parseJsonSafely(rawText);
+            if (cleanKey) {
+                writeStoredActiveModel(modelName);
+            }
+            return { parsed, usedModel: modelName };
+        } catch (err) {
+            if (err.name === "AbortError") throw err;
+            if (
+                err.message === "NO_API_KEY" ||
+                err.message?.startsWith("INVALID_KEY:") ||
+                err.message?.startsWith("FORBIDDEN_KEY:")
+            ) {
+                throw err;
+            }
+            lastError = err;
+        }
+    }
+
+    if (!cleanKey) {
+        throw new Error("NO_API_KEY");
+    }
+    throw lastError || new Error("ALL_MODELS_FAILED");
+}
+
+// استخراج آخر جملة أو مقطع منطوق لربط الأمثلة الشبيهة به مباشرة
+const getLastClauseOrChunk = (str) => {
+    if (!str)
+        return "";
+    const clauses = str
+        .split(/[.!؟?,،\n]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const lastClause = clauses[clauses.length - 1] || str.trim();
+    const words = lastClause.split(/\s+/);
+    return words.length > 7 ? words.slice(-6).join(" ") : lastClause;
+};
+
+// تنسيق الثواني إلى (MM:SS) أو (HH:MM:SS)
+const formatDuration = (totalSeconds) => {
+    const safeSec = Math.max(0, Math.floor(totalSeconds || 0));
+    const hours = Math.floor(safeSec / 3600);
+    const mins = Math.floor((safeSec % 3600) / 60);
+    const secs = safeSec % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    if (hours > 0) {
+        return `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+    }
+    return `${pad(mins)}:${pad(secs)}`;
+};
+
+// مفتاح تاريخ اليوم لحفظ عداد التحدث اليومي تلقائياً
+const getTodayStorageKey = () => {
+    const d = new Date();
+    return `day_${d.getFullYear()}_${d.getMonth() + 1}_${d.getDate()}`;
+};
+
+// قاموس البدائل والمعاني الفورية (0ms) عند الضغط على أي جزء مصحح بالأخضر
+const INSTANT_WORD_ALTERNATIVES = {
+    "eine fahrkarte": {
+        arabicMeaning: "تذكرة سفر (قطار / باص / مواصلات)",
+        alternatives: [
+            { de: "ein Ticket", ar: "تذكرة (شائعة جداً في الحياة اليومية)" },
+            { de: "einen Fahrschein", ar: "تذكرة ركوب (رسمية للمواصلات)" },
+            { de: "eine Zugfahrkarte", ar: "تذكرة قطار تحديداً" }
+        ]
+    },
+    "ein ticket": {
+        arabicMeaning: "تذكرة (سفر / طيران / سينما / قطار)",
+        alternatives: [
+            { de: "eine Fahrkarte", ar: "تذكرة سفر للمواصلات" },
+            { de: "einen Fahrschein", ar: "تذكرة مرور/ركوب" },
+            { de: "eine Reservierung", ar: "حجز مقعد" }
+        ]
+    },
+    "buchen": {
+        arabicMeaning: "يحجز (تذكرة / فندق / رحلة)",
+        alternatives: [
+            { de: "reservieren", ar: "يحجز مسبقاً (مقعد / طاولة / غرفة)" },
+            { de: "kaufen", ar: "يشتري مباشرة" },
+            { de: "bestellen", ar: "يطلب أونلاين" }
+        ]
+    },
+    "rauche": {
+        arabicMeaning: "أدخن (فعل التدخين الصحيح مع السجائر)",
+        alternatives: [
+            { de: "paffe", ar: "أنفث الدخان (دارج)" },
+            { de: "mache eine Rauchpause", ar: "آخذ استراحة تدخين" },
+            { de: "zünde mir eine Zigarette an", ar: "أشعل سيجارة" }
+        ]
+    },
+    "mir ist kalt": {
+        arabicMeaning: "أنا أشعر بالبرد (الصيغة الصحيحة عند الألمان)",
+        alternatives: [
+            { de: "Ich friere", ar: "أنا أرتجف من البرد / بردان جداً" },
+            { de: "Es ist mir kalt", ar: "الجو بارد بالنسبة لي" },
+            { de: "Mir ist eiskalt", ar: "أنا متجمد من البرد" }
+        ]
+    },
+    "kalt": {
+        arabicMeaning: "بارد",
+        alternatives: [
+            { de: "kühl", ar: "مائل للبرودة / منعش" },
+            { de: "eiskalt", ar: "بارد كالثلج" },
+            { de: "frostig", ar: "قارس البرودة" }
+        ]
+    },
+    "ich habe hunger": {
+        arabicMeaning: "أنا جائع (حرفياً: عندي جوع)",
+        alternatives: [
+            { de: "Ich bin hungrig", ar: "أنا جائع (صفة)" },
+            { de: "Ich habe großen Hunger", ar: "أنا جائع جداً" },
+            { de: "Ich könnte etwas essen", ar: "أود تناول شيء ما" }
+        ]
+    },
+    "einen termin": {
+        arabicMeaning: "موعد رسمي أو طبي",
+        alternatives: [
+            { de: "eine Verabredung", ar: "موعد شخصي / لقاء مع صديق" },
+            { de: "ein Treffen", ar: "اجتماع / مقابلة" },
+            { de: "eine Reservierung", ar: "حجز مسبق" }
+        ]
+    }
+};
+
+// قاموس محلي لحظي (0ms) للترجمة والتصحيح المبدئي الفوري أثناء الكلام قبل رد الخادم
+const LOCAL_INSTANT_DICTIONARY = {
+    "تذكرة سفر": { de: "eine Fahrkarte", articleDe: "die Fahrkarte", pron: "دي فاركارتِه" },
+    "تذكرة": { de: "ein Ticket", articleDe: "das Ticket", pron: "داس تيكيت" },
+    "حجز": { de: "buchen", articleDe: "buchen", pron: "بوخِن" },
+    "أحجز": { de: "buchen", articleDe: "buchen", pron: "بوخِن" },
+    "بردان": { de: "kalt", articleDe: "Mir ist kalt", pron: "مير إست كالت" },
+    "جوعان": { de: "Hunger", articleDe: "Ich habe Hunger", pron: "إيش هابِه هونجر" },
+    "عطشان": { de: "Durst", articleDe: "Ich habe Durst", pron: "إيش هابِه دورست" },
+    "تعبان": { de: "müde", articleDe: "Ich bin müde", pron: "إيش بين مودِه" },
+    "مستشفى": { de: "das Krankenhaus", articleDe: "das Krankenhaus", pron: "داس كرانكِن هاوس" },
+    "طبيب": { de: "der Arzt", articleDe: "der Arzt", pron: "دير آرتست" },
+    "دكتور": { de: "der Arzt", articleDe: "der Arzt", pron: "دير آرتست" },
+    "صيدلية": { de: "die Apotheke", articleDe: "die Apotheke", pron: "دي أبوتيكِه" },
+    "محطة": { de: "der Bahnhof", articleDe: "der Bahnhof", pron: "دير بانهوف" },
+    "مطار": { de: "der Flughafen", articleDe: "der Flughafen", pron: "دير فلوج هافِن" },
+    "فندق": { de: "das Hotel", articleDe: "das Hotel", pron: "داس هوتيل" },
+    "مطعم": { de: "das Restaurant", articleDe: "das Restaurant", pron: "داس ريستورانت" },
+    "حساب": { de: "die Rechnung", articleDe: "die Rechnung", pron: "دي ريشنونج" },
+    "الفاتورة": { de: "die Rechnung", articleDe: "die Rechnung", pron: "دي ريشنونج" },
+    "معدتي": { de: "mein Magen", articleDe: "der Magen", pron: "دير ماجن" },
+    "بطني": { de: "mein Bauch", articleDe: "der Bauch", pron: "دير باوخ" },
+    "تؤلمني": { de: "tut mir weh", articleDe: "weh tun", pron: "توت مير فيه" },
+    "بيوجعني": { de: "tut mir weh", articleDe: "weh tun", pron: "توت مير فيه" },
+    "مساعدة": { de: "Hilfe", articleDe: "die Hilfe", pron: "دي هيلفِه" },
+    "شغل": { de: "die Arbeit", articleDe: "die Arbeit", pron: "دي أربايت" },
+    "عمل": { de: "die Arbeit", articleDe: "die Arbeit", pron: "دي أربايت" },
+    "موعد": { de: "einen Termin", articleDe: "der Termin", pron: "دير تيرمين" },
+    "ميعاد": { de: "einen Termin", articleDe: "der Termin", pron: "دير تيرمين" },
+    "بكرة": { de: "morgen", articleDe: "morgen", pron: "مورجن" },
+    "غدا": { de: "morgen", articleDe: "morgen", pron: "مورجن" },
+    "النهاردة": { de: "heute", articleDe: "heute", pron: "هويتِه" },
+    "اليوم": { de: "heute", articleDe: "heute", pron: "هويتِه" },
+    "امبارح": { de: "gestern", articleDe: "gestern", pron: "جيسترن" },
+    "أمس": { de: "gestern", articleDe: "gestern", pron: "جيسترن" },
+    "فلوس": { de: "Geld", articleDe: "das Geld", pron: "داس جيلد" },
+    "سيارة": { de: "das Auto", articleDe: "das Auto", pron: "داس أوتو" },
+    "عربية": { de: "das Auto", articleDe: "das Auto", pron: "داس أوتو" },
+    "شقة": { de: "die Wohnung", articleDe: "die Wohnung", pron: "دي فونونج" },
+    "بيت": { de: "das Haus", articleDe: "das Haus", pron: "داس هاوس" },
+    "مفتاح": { de: "der Schlüssel", articleDe: "der Schlüssel", pron: "دير شلوسِل" },
+    "مشكلة": { de: "das Problem", articleDe: "das Problem", pron: "داس بروبليم" },
+    "سؤال": { de: "eine Frage", articleDe: "die Frage", pron: "دي فراجِه" },
+    "امتحان": { de: "die Prüfung", articleDe: "die Prüfung", pron: "دي بروفونج" }
+};
+
+// قاموس ترجمة سريعة للكلمات الألمانية الشائعة لعرض معاني فورية أثناء التحدث (0ms)
+const GERMAN_TO_ARABIC_QUICK = {
+    "ich": "أنا",
+    "möchte": "أود/أريد",
+    "will": "أريد",
+    "kann": "أستطيع",
+    "muss": "يجب أن",
+    "brauche": "أحتاج",
+    "habe": "لدي/عندي",
+    "bin": "أكون",
+    "gehen": "أذهب",
+    "gehe": "أذهب",
+    "fahre": "أسافر/أركب",
+    "fahren": "يسافر",
+    "nach": "إلى",
+    "in": "في",
+    "mit": "مع/بواسطة",
+    "heute": "اليوم",
+    "morgen": "غداً",
+    "gestern": "أمس",
+    "bitte": "من فضلك",
+    "danke": "شكراً",
+    "wo": "أين",
+    "wann": "متى",
+    "wie": "كيف",
+    "warum": "لماذا",
+    "was": "ماذا",
+    "ist": "يكون",
+    "sind": "يكونوا",
+    "der": "الـ",
+    "die": "الـ",
+    "das": "الـ",
+    "ein": "واحد/ـة",
+    "eine": "واحدة",
+    "einen": "واحداً",
+    "nicht": "ليس/لا",
+    "kein": "لا يوجد",
+    "keine": "لا توجد",
+    "bahnhof": "محطة القطار",
+    "flughafen": "المطار",
+    "hotel": "الفندق",
+    "arzt": "الطبيب",
+    "krankenhaus": "المستشفى",
+    "apotheke": "الصيدلية",
+    "essen": "طعام/يأكل",
+    "trinken": "يشرب",
+    "wasser": "ماء",
+    "kaffee": "قهوة",
+    "rechnung": "الفاتورة",
+    "termin": "موعد",
+    "arbeit": "العمل",
+    "auto": "السيارة",
+    "zug": "القطار",
+    "bus": "الحافلة",
+    "ticket": "تذكرة",
+    "fahrkarte": "تذكرة سفر",
+    "buchen": "يحجز",
+    "kaufen": "يشتري",
+    "helfen": "يساعد",
+    "hilfe": "مساعدة",
+    "kalt": "بارد",
+    "warm": "دافئ",
+    "gut": "جيد",
+    "schlecht": "سيئ",
+    "viel": "كثير",
+    "wenig": "قليل",
+    "schnell": "سريع",
+    "langsam": "بطيء",
+    "berlin": "برلين",
+    "münchen": "ميونخ",
+    "hamburg": "هامبورغ",
+    "frankfurt": "فرانكفورت",
+    "deutsch": "ألماني",
+    "deutschland": "ألمانيا",
+    "sprechen": "يتحدث",
+    "verstehen": "يفهم",
+    "lernen": "يتعلم"
+};
+
+// ذاكرة تخزين فورية (0ms) للجمل الشائعة والمكررة
+const INSTANT_CACHE = new Map([
+    [
+        "ich möchte تذكرة سفر nach berlin حجز",
+        {
+            userSentence: "Ich möchte تذكرة سفر nach Berlin حجز",
+            isCorrect: false,
+            correctedGerman: "Ich möchte eine Fahrkarte nach Berlin buchen.",
+            arabicMeaning: "أود حجز تذكرة سفر إلى برلين.",
+            lastArabicChunk: {
+                hasArabic: true,
+                arabicSpoken: "تذكرة سفر / حجز",
+                germanEquivalent: "die Fahrkarte / buchen",
+                arabicPronunciation: "دي فاركارتِه / بوخِن"
+            },
+            replacedWords: [
+                {
+                    wrongOrArabic: "تذكرة سفر",
+                    rightGerman: "eine Fahrkarte",
+                    arabicMeaning: "تذكرة سفر (قطار / باص / مواصلات)",
+                    alternatives: [
+                        { de: "ein Ticket", ar: "تذكرة (شائعة جداً يومياً)" },
+                        { de: "einen Fahrschein", ar: "تذكرة ركوب رسمية" },
+                        { de: "eine Zugfahrkarte", ar: "تذكرة قطار" }
+                    ]
+                },
+                {
+                    wrongOrArabic: "حجز",
+                    rightGerman: "buchen",
+                    arabicMeaning: "يحجز (تذكرة / فندق / رحلة)",
+                    alternatives: [
+                        { de: "reservieren", ar: "يحجز مقعداً أو غرفة" },
+                        { de: "kaufen", ar: "يشتري مباشرة" },
+                        { de: "bestellen", ar: "يطلب" }
+                    ]
+                }
+            ],
+            contextAndLogic: "السياق مضبوط ومنطقي 100%؛ في الألمانية يأتي الفعل (buchen) في آخر الجملة بعد (möchte).",
+            similarExamples: [
+                { de: "Ich möchte ein Ticket nach Berlin kaufen.", ar: "أود شراء تذكرة إلى برلين.", tag: "بديل شائع" },
+                { de: "Was kostet eine Fahrkarte nach Berlin?", ar: "كم سعر تذكرة السفر إلى برلين؟", tag: "سؤال" },
+                { de: "Einfach oder Hin und Zurück?", ar: "ذهاب فقط أم ذهاب وعودة؟", tag: "محادثة" },
+                { de: "Ich brauche eine Reservierung für den Zug nach Berlin.", ar: "أحتاج حجزاً للقطار المتجه إلى برلين.", tag: "رسمي" },
+                { de: "Wann fährt der nächste Zug nach Berlin ab?", ar: "متى ينطلق القطار القادم إلى برلين؟", tag: "سؤال" },
+                { de: "Kann ich die Fahrkarte hier am Schalter buchen?", ar: "هل يمكنني حجز التذكرة هنا من الشباك؟", tag: "يومي" }
+            ]
+        }
+    ],
+    [
+        "ich trinke eine zigarette",
+        {
+            userSentence: "Ich trinke eine Zigarette",
+            isCorrect: false,
+            correctedGerman: "Ich rauche eine Zigarette.",
+            arabicMeaning: "أنا أدخن سيجارة.",
+            lastArabicChunk: {
+                hasArabic: false,
+                arabicSpoken: "",
+                germanEquivalent: "",
+                arabicPronunciation: ""
+            },
+            replacedWords: [
+                {
+                    wrongOrArabic: "trinke",
+                    rightGerman: "rauche",
+                    arabicMeaning: "أدخن (مع السجائر والشيشة)",
+                    alternatives: [
+                        { de: "paffe", ar: "أنفث الدخان" },
+                        { de: "zünde mir an", ar: "أشعل سيجارة" },
+                        { de: "mache eine Rauchpause", ar: "آخذ استراحة تدخين" }
+                    ]
+                }
+            ],
+            contextAndLogic: "غير منطقية عند الألمان؛ في العربية نقول (أشرب سيجارة) لكن بالألمانية يجب استخدام فعل التدخين (rauchen).",
+            similarExamples: [
+                { de: "Darf man hier rauchen?", ar: "هل يُسمح بالتدخين هنا؟", tag: "سؤال شائع" },
+                { de: "Ich rauche seit einem Jahr nicht mehr.", ar: "لم أعد أدخن منذ عام.", tag: "يومي" },
+                { de: "Hast du vielleicht Feuer für mich?", ar: "هل معك ولاعة من فضلك؟", tag: "محادثة" },
+                { de: "Wo ist hier der Raucherbereich?", ar: "أين منطقة المدخنين هنا؟", tag: "سؤال" },
+                { de: "Rauchen ist im Bahnhof verboten.", ar: "التدخين ممنوع في محطة القطار.", tag: "رسمي" },
+                { de: "Ich gehe kurz nach draußen, eine rauchen.", ar: "سأخرج قليلاً لتدخين سيجارة.", tag: "دارج" }
+            ]
+        }
+    ],
+    [
+        "wo ist der nächste bahnhof?",
+        {
+            userSentence: "Wo ist der nächste Bahnhof?",
+            isCorrect: true,
+            correctedGerman: "Wo ist der nächste Bahnhof?",
+            arabicMeaning: "أين أقرب محطة قطار؟",
+            lastArabicChunk: {
+                hasArabic: false,
+                arabicSpoken: "",
+                germanEquivalent: "",
+                arabicPronunciation: ""
+            },
+            replacedWords: [],
+            contextAndLogic: "جملة صحيحة ومنطقية 100% وسياقها طبيعي جداً للسؤال عن الاتجاهات في الشارع.",
+            similarExamples: [
+                { de: "Wie komme ich am besten zum Bahnhof?", ar: "كيف أصل بأفضل طريقة إلى محطة القطار؟", tag: "يومي" },
+                { de: "Wo ist die nächste Bushaltestelle?", ar: "أين أقرب محطة حافلات؟", tag: "بديل شائع" },
+                { de: "Entschuldigung, können Sie mir den Weg zum Bahnhof zeigen?", ar: "عفواً، هل يمكنك إرشادي للطريق إلى المحطة؟", tag: "رسمي مهذب" },
+                { de: "Ist der Bahnhof weit von hier?", ar: "هل محطة القطار بعيدة من هنا؟", tag: "سؤال" },
+                { de: "Gehen Sie einfach geradeaus und dann links.", ar: "امشِ مباشرة للأمام ثم يساراً.", tag: "رد سريع" },
+                { de: "Wo finde ich die U-Bahn-Station?", ar: "أين أجد محطة المترو؟", tag: "محادثة" }
+            ]
+        }
+    ],
+    [
+        "ich bin بردان",
+        {
+            userSentence: "Ich bin بردان",
+            isCorrect: false,
+            correctedGerman: "Mir ist kalt.",
+            arabicMeaning: "أنا أشعر بالبرد.",
+            lastArabicChunk: {
+                hasArabic: true,
+                arabicSpoken: "بردان",
+                germanEquivalent: "Mir ist kalt / kalt",
+                arabicPronunciation: "مير إست كالت"
+            },
+            replacedWords: [
+                {
+                    wrongOrArabic: "Ich bin بردان",
+                    rightGerman: "Mir ist kalt",
+                    arabicMeaning: "أنا أشعر بالبرد (الصيغة الطبيعية بالألمانية)",
+                    alternatives: [
+                        { de: "Ich friere", ar: "أنا أرتجف من البرد" },
+                        { de: "Mir ist eiskalt", ar: "أنا متجمد من البرد" },
+                        { de: "Es ist mir zu kalt", ar: "الجو بارد جداً بالنسبة لي" }
+                    ]
+                }
+            ],
+            contextAndLogic: "تنبيه منطقي مهم: عند الألمان لا نقول (Ich bin kalt) لأنها تعني بارد المشاعر، بل نقول (Mir ist kalt).",
+            similarExamples: [
+                { de: "Mir ist heute sehr warm.", ar: "أشعر بالحر الشديد اليوم.", tag: "يومي" },
+                { de: "Ist dir auch so kalt?", ar: "هل تشعر بالبرد مثلي أيضاً؟", tag: "سؤال" },
+                { de: "Ich friere ein bisschen.", ar: "أنا أرتجف من البرد قليلاً.", tag: "بديل شائع" },
+                { de: "Können wir bitte das Fenster schließen? Mir ist kalt.", ar: "هل يمكننا إغلاق النافذة من فضلك؟ أشعر بالبرد.", tag: "مهذب" },
+                { de: "Zieh dir eine dicke Jacke an, draußen ist es eiskalt.", ar: "ارتدِ معطفاً ثقيلاً، الجو في الخارج بارد كالثلج.", tag: "محادثة" },
+                { de: "Mir ist plötzlich heiß geworden.", ar: "شعرت بالحر فجأة.", tag: "يومي" }
+            ]
+        }
+    ]
+]);
+
+// جمل افتراضية في خزنة الحفظ لتجربة المراجعة الصوتية والقائمة المنسدلة للبدايل فوراً
+const DEFAULT_SAVED_VAULT = [
+    {
+        id: "vault-default-1",
+        userSentence: "Ich möchte تذكرة سفر nach Berlin حجز",
+        correctedGerman: "Ich möchte eine Fahrkarte nach Berlin buchen.",
+        arabicMeaning: "أود حجز تذكرة سفر إلى برلين.",
+        category: "سفر ومواصلات",
+        replacedWords: [
+            {
+                wrongOrArabic: "تذكرة سفر",
+                rightGerman: "eine Fahrkarte",
+                arabicMeaning: "تذكرة سفر (قطار / باص)",
+                alternatives: [
+                    { de: "ein Ticket", ar: "تذكرة (شائعة جداً يومياً)" },
+                    { de: "einen Fahrschein", ar: "تذكرة ركوب رسمية" },
+                    { de: "eine Zugfahrkarte", ar: "تذكرة قطار" }
+                ]
+            },
+            {
+                wrongOrArabic: "حجز",
+                rightGerman: "buchen",
+                arabicMeaning: "يحجز (تذكرة / فندق)",
+                alternatives: [
+                    { de: "reservieren", ar: "يحجز مقعداً أو غرفة" },
+                    { de: "kaufen", ar: "يشتري مباشرة" },
+                    { de: "bestellen", ar: "يطلب أونلاين" }
+                ]
+            }
+        ],
+        similarExamples: [
+            { de: "Ich möchte ein Ticket nach Berlin kaufen.", ar: "أود شراء تذكرة إلى برلين.", tag: "بديل شائع" },
+            { de: "Können Sie mir bitte eine Fahrkarte nach Berlin reservieren?", ar: "هل يمكنك حجز تذكرة لي إلى برلين من فضلك؟", tag: "رسمي مهذب" },
+            { de: "Was kostet eine Fahrkarte nach Berlin?", ar: "كم سعر تذكرة السفر إلى برلين؟", tag: "سؤال" },
+            { de: "Einmal nach Berlin, bitte!", ar: "تذكرة واحدة إلى برلين من فضلك!", tag: "مختصر سريع" },
+            { de: "Ich brauche eine Sitzplatzreservierung nach Berlin.", ar: "أحتاج حجز مقعد إلى برلين.", tag: "مواصلات" }
+        ],
+        reviewed: false,
+        savedAt: "محفوظة في الخزنة",
+        createdAtMs: 1700000002000
+    },
+    {
+        id: "vault-default-2",
+        userSentence: "Ich bin بردان",
+        correctedGerman: "Mir ist kalt.",
+        arabicMeaning: "أنا أشعر بالبرد.",
+        category: "محادثة يومية",
+        replacedWords: [
+            {
+                wrongOrArabic: "Ich bin بردان",
+                rightGerman: "Mir ist kalt",
+                arabicMeaning: "أشعر بالبرد (الصيغة الطبيعية عند الألمان)",
+                alternatives: [
+                    { de: "Ich friere", ar: "أنا أرتجف من البرد" },
+                    { de: "Mir ist eiskalt", ar: "أنا متجمد من البرد" },
+                    { de: "Es ist mir zu kalt", ar: "الجو بارد جداً بالنسبة لي" }
+                ]
+            }
+        ],
+        similarExamples: [
+            { de: "Ich friere ein bisschen.", ar: "أنا أرتجف من البرد قليلاً.", tag: "بديل شائع" },
+            { de: "Mir ist heute wirklich eiskalt.", ar: "أنا متجمد من البرد حقاً اليوم.", tag: "يومي" },
+            { de: "Ist dir auch so kalt?", ar: "هل تشعر بالبرد مثلي أيضاً؟", tag: "سؤال" },
+            { de: "Können wir das Fenster schließen? Mir ist kalt.", ar: "هل يمكننا إغلاق النافذة؟ أشعر بالبرد.", tag: "طلب مهذب" }
+        ],
+        reviewed: false,
+        savedAt: "محفوظة في الخزنة",
+        createdAtMs: 1700000001000
+    }
+];
+
+const normalizeKey = (str) => (str || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.!؟?,،]+$/g, "")
+    .replace(/\s+/g, " ");
+
+// دالة فورية (0ms) لجلب المعنى العربي والبدائل لأي كلمة مصححة يتم الضغط عليها
+function getInstantWordDetails(wordItem) {
+    if (!wordItem)
+        return null;
+    const rightClean = (wordItem.rightGerman || "").trim().toLowerCase();
+    const preset = INSTANT_WORD_ALTERNATIVES[rightClean];
+    const fallbackWords = rightClean
+        .split(/\s+/)
+        .map((w) => GERMAN_TO_ARABIC_QUICK[w])
+        .filter(Boolean)
+        .join(" ");
+    const arabicMeaning = wordItem.arabicMeaning ||
+        preset?.arabicMeaning ||
+        (wordItem.wrongOrArabic && /[\u0600-\u06FF]/.test(wordItem.wrongOrArabic)
+            ? wordItem.wrongOrArabic
+            : fallbackWords || "الصيغة الألمانية الصحيحة في هذا السياق");
+    const alternatives = wordItem.alternatives && wordItem.alternatives.length > 0
+        ? wordItem.alternatives
+        : preset?.alternatives || [
+            { de: wordItem.rightGerman, ar: "التعبير الأدق والأكثر طبيعية هنا" }
+        ];
+    return {
+        wrongOrArabic: wordItem.wrongOrArabic,
+        rightGerman: wordItem.rightGerman,
+        arabicMeaning,
+        alternatives
+    };
+}
+
+// ==========================================
+// محلل محلي فوري (0ms) يعمل أثناء التحدث قبل وصول رد الـ API
+// ==========================================
+function buildLocalInstantPreview(rawText, currentResult) {
+    const trimmed = (rawText || "").trim();
+    if (!trimmed)
+        return null;
+    const replacedWords = [];
+    let draftGerman = trimmed;
+    let detectedArabicChunk = null;
+    const sortedArabicKeys = Object.keys(LOCAL_INSTANT_DICTIONARY).sort((a, b) => b.length - a.length);
+    for (const arKey of sortedArabicKeys) {
+        if (draftGerman.includes(arKey)) {
+            const entry = LOCAL_INSTANT_DICTIONARY[arKey];
+            draftGerman = draftGerman.split(arKey).join(entry.de);
+            const preset = INSTANT_WORD_ALTERNATIVES[entry.de.toLowerCase()];
+            replacedWords.push({
+                wrongOrArabic: arKey,
+                rightGerman: entry.de,
+                arabicMeaning: preset?.arabicMeaning || arKey,
+                alternatives: preset?.alternatives || [
+                    { de: entry.articleDe, ar: `الأصل: ${arKey} (${entry.pron})` }
+                ]
+            });
+            detectedArabicChunk = {
+                hasArabic: true,
+                arabicSpoken: arKey,
+                germanEquivalent: entry.articleDe,
+                arabicPronunciation: entry.pron
+            };
+        }
+    }
+    if (/ich\s+bin\s+kalt/i.test(draftGerman)) {
+        draftGerman = draftGerman.replace(/ich\s+bin\s+kalt/gi, "Mir ist kalt");
+        replacedWords.push({
+            wrongOrArabic: "Ich bin kalt",
+            rightGerman: "Mir ist kalt",
+            arabicMeaning: "أنا أشعر بالبرد",
+            alternatives: INSTANT_WORD_ALTERNATIVES["mir ist kalt"].alternatives
+        });
+    }
+    if (/trinke\s+eine\s+zigarette/i.test(draftGerman)) {
+        draftGerman = draftGerman.replace(/trinke/gi, "rauche");
+        replacedWords.push({
+            wrongOrArabic: "trinke",
+            rightGerman: "rauche",
+            arabicMeaning: "أدخن",
+            alternatives: INSTANT_WORD_ALTERNATIVES["rauche"].alternatives
+        });
+    }
+    const tokens = draftGerman
+        .replace(/[.!?,،؟]/g, "")
+        .split(/\s+/)
+        .filter(Boolean);
+    const translatedTokens = tokens.map((tok) => {
+        const clean = tok.toLowerCase();
+        if (GERMAN_TO_ARABIC_QUICK[clean])
+            return GERMAN_TO_ARABIC_QUICK[clean];
+        return tok;
+    });
+    const hasAnyArabicChars = /[\u0600-\u06FF]/.test(trimmed);
+    const isLocallyModified = replacedWords.length > 0 || hasAnyArabicChars;
+    return {
+        userSentence: trimmed,
+        isCorrect: !isLocallyModified && (currentResult?.isCorrect ?? true),
+        correctedGerman: draftGerman,
+        arabicMeaning: translatedTokens.join(" ") ||
+            currentResult?.arabicMeaning ||
+            "جاري الترجمة اللحظية بالذكاء الاصطناعي...",
+        lastArabicChunk: detectedArabicChunk ||
+            currentResult?.lastArabicChunk || {
+            hasArabic: false,
+            arabicSpoken: "",
+            germanEquivalent: "",
+            arabicPronunciation: ""
+        },
+        replacedWords: replacedWords.length > 0
+            ? replacedWords
+            : currentResult?.replacedWords || [],
+        contextAndLogic: currentResult?.contextAndLogic ||
+            "جاري تحليل السياق والمنطق بالذكاء الاصطناعي...",
+        similarExamples: currentResult?.similarExamples || [],
+        isLiveDraft: true
+    };
+}
+
+export default function App() {
+    // =====================================================
+    // 0. حالة ربط الـ API الحقيقية والدائمة 100% عند عمل Refresh
+    // =====================================================
+    const initialSavedKey = readStoredApiKey();
+    const [userApiKey, setUserApiKey] = useState(initialSavedKey);
+    const [apiKeyInput, setApiKeyInput] = useState(initialSavedKey);
+    const apiKeyRef = useRef(initialSavedKey);
+
+    const [activeModelName, setActiveModelName] = useState(getInitialModel);
+    const [showApiPanel, setShowApiPanel] = useState(!initialSavedKey);
+    const [showApiKeySecret, setShowApiKeySecret] = useState(false);
+    const [apiTestStatus, setApiTestStatus] = useState(initialSavedKey ? "testing" : "missing"); // "missing" | "testing" | "connected" | "error"
+    const [apiStatusMessage, setApiStatusMessage] = useState(
+        initialSavedKey
+            ? "⏳ جاري التحقق الفعلي من اتصال مفتاح الـ API المحفوظ مع سيرفرات Google..."
+            : ""
+    );
+
+    const [inputText, setInputText] = useState("Ich möchte تذكرة سفر nach Berlin حجز");
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [result, setResult] = useState(INSTANT_CACHE.get("ich möchte تذكرة سفر nach berlin حجز"));
+
+    // التحقق الحقيقي من المفتاح المحفوظ عند تحميل أو عمل Refresh للصفحة
+    useEffect(() => {
+        const stored = readStoredApiKey();
+        if (stored) {
+            apiKeyRef.current = stored;
+            setUserApiKey(stored);
+            setApiKeyInput(stored);
+            writeStoredApiKey(stored);
+            verifyApiKeyWithGoogle(stored)
+                .then((workingModel) => {
+                    setActiveModelName(workingModel);
+                    setApiTestStatus("connected");
+                    setApiStatusMessage(`✅ متصل فعلياً بسيرفر Google Gemini! (الموديل النشط: ${workingModel})`);
+                })
+                .catch((err) => {
+                    setApiTestStatus("error");
+                    setShowApiPanel(true);
+                    setApiStatusMessage(`❌ المفتاح المحفوظ لم ينجح في الاتصال: ${err.message}`);
+                });
+        }
+    }, []);
+
+    // سجل المحادثة الكامل
+    const [conversationTurns, setConversationTurns] = useState([
+        {
+            id: "turn-init-1",
+            ...INSTANT_CACHE.get("ich bin بردان")
+        },
+        {
+            id: "turn-init-2",
+            ...INSTANT_CACHE.get("wo ist der nächste bahnhof?")
+        }
+    ]);
+
+    const [user, setUser] = useState(null);
+    const [cloudSynced, setCloudSynced] = useState(false);
+
+    // =====================================================
+    // 1. حالة الخزنة والحافظة الذكية الدائمة (Persistent Smart Vault)
+    // =====================================================
+    const [savedVault, setSavedVault] = useState(() => {
+        try {
+            const stored = window.localStorage.getItem('deutsch-turbo-vault');
+            if (stored !== null) {
+                const parsed = JSON.parse(stored);
+                if (Array.isArray(parsed) && parsed.length > 0)
+                    return parsed;
+            }
+        }
+        catch (_) { }
+        return DEFAULT_SAVED_VAULT;
+    });
+    useEffect(() => {
+        try {
+            window.localStorage.setItem('deutsch-turbo-vault', JSON.stringify(savedVault));
+        }
+        catch (_) { }
+    }, [savedVault]);
+    const [showVaultModal, setShowVaultModal] = useState(false);
+    const [vaultFilter, setVaultFilter] = useState("all");
+    const [vaultSearchQuery, setVaultSearchQuery] = useState("");
+    const [expandedVaultIds, setExpandedVaultIds] = useState({});
+    const [showPasteBoxDropdown, setShowPasteBoxDropdown] = useState(false);
+    const [pasteBoxText, setPasteBoxText] = useState("");
+    const [isOrganizingPaste, setIsOrganizingPaste] = useState(false);
+    const [loadingMoreVaultId, setLoadingMoreVaultId] = useState(null);
+    const [vaultToastMsg, setVaultToastMsg] = useState(null);
+    const [showBackupArea, setShowBackupArea] = useState(false);
+    const [backupJsonText, setBackupJsonText] = useState("");
+    const [showToolsDropdown, setShowToolsDropdown] = useState(false);
+    const [showExamplesDropdown, setShowExamplesDropdown] = useState(false);
+    const [showHistoryDropdown, setShowHistoryDropdown] = useState(false);
+
+    // =====================================================
+    // 2. حالة عداد إجمالي وقت التحدث الفعلي (يحسب الكلام فقط ولا يحسب الصمت!)
+    // =====================================================
+    const [totalSpokenSeconds, setTotalSpokenSeconds] = useState(() => {
+        try {
+            const savedSec = Number(window.localStorage.getItem('deutsch-turbo-timer-' + getTodayStorageKey()));
+            if (savedSec > 0) return savedSec;
+            const cookieSec = Number(readCookieValue('dt_timer_' + getTodayStorageKey()));
+            if (cookieSec > 0) return cookieSec;
+        } catch (_) {}
+        return 0;
+    });
+    useEffect(() => {
+        try {
+            const key = getTodayStorageKey();
+            window.localStorage.setItem('deutsch-turbo-timer-' + key, String(totalSpokenSeconds));
+            writeCookieValue('dt_timer_' + key, String(totalSpokenSeconds));
+        } catch (_) {}
+    }, [totalSpokenSeconds]);
+
+    const [dailyGoalMinutes, setDailyGoalMinutes] = useState(() => {
+        try {
+            return Number(window.localStorage.getItem('deutsch-turbo-daily-goal')) || 15;
+        } catch (_) {}
+        return 15;
+    });
+    useEffect(() => {
+        try {
+            window.localStorage.setItem('deutsch-turbo-daily-goal', String(dailyGoalMinutes));
+        } catch (_) {}
+    }, [dailyGoalMinutes]);
+
+    const [showSpeakingTimerModal, setShowSpeakingTimerModal] = useState(false);
+    const [customGoalInput, setCustomGoalInput] = useState("");
+
+    // حالة تتبع النشاط الصوتي الفعلي (هل المستخدم يتكلم الآن فعلاً أم ساكت والمايك مفتوح؟)
+    const [isActivelySpeaking, setIsActivelySpeaking] = useState(false);
+    const lastVoiceActivityRef = useRef(0);
+    const audioContextRef = useRef(null);
+    const audioStreamRef = useRef(null);
+    const volumeIntervalRef = useRef(null);
+
+    // دالة لتسجيل نشاط صوتي حقيقي عندما ينطق المستخدم حرفاً أو يرتفع صوت المايك
+    const markActualVoiceActivity = () => {
+        lastVoiceActivityRef.current = Date.now();
+        setIsActivelySpeaking(true);
+    };
+
+    useEffect(() => {
+        if (!auth)
+            return;
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== "undefined" &&
+                    __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                }
+                else {
+                    await signInAnonymously(auth);
+                }
+            }
+            catch (_) { }
+        };
+        initAuth();
+        const unsubscribe = onAuthStateChanged(auth, (u) => {
+            setUser(u);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    useEffect(() => {
+        if (!user || !db)
+            return;
+        const vaultColRef = collection(db, "artifacts", appId, "users", user.uid, "vault_items");
+        const unsubVault = onSnapshot(vaultColRef, (snapshot) => {
+            setCloudSynced(true);
+            if (snapshot.empty) {
+                DEFAULT_SAVED_VAULT.forEach((item) => {
+                    const itemRef = doc(db, "artifacts", appId, "users", user.uid, "vault_items", item.id);
+                    setDoc(itemRef, item).catch(() => { });
+                });
+                return;
+            }
+            const loaded = [];
+            snapshot.forEach((docSnap) => {
+                loaded.push(docSnap.data());
+            });
+            loaded.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
+            setSavedVault(loaded);
+        }, () => {
+            setCloudSynced(false);
+        });
+        const statsColRef = collection(db, "artifacts", appId, "users", user.uid, "daily_stats");
+        const unsubStats = onSnapshot(statsColRef, (snapshot) => {
+            const todayId = getTodayStorageKey();
+            snapshot.forEach((docSnap) => {
+                const data = docSnap.data();
+                if (docSnap.id === todayId && typeof data.seconds === "number") {
+                    setTotalSpokenSeconds((prev) => Math.max(prev, data.seconds));
+                }
+                if (docSnap.id === "settings" && typeof data.goalMinutes === "number") {
+                    setDailyGoalMinutes(data.goalMinutes);
+                }
+            });
+        }, () => { });
+        return () => {
+            unsubVault();
+            unsubStats();
+        };
+    }, [user]);
+
+    const triggerVaultToast = (msg) => {
+        setVaultToastMsg(msg);
+        setTimeout(() => {
+            setVaultToastMsg(null);
+        }, 2600);
+    };
+
+    // =====================================================
+    // حفظ وفحص حقيقي 100% لمفتاح الـ API (بدون أي رسائل نجاح وهمية)
+    // =====================================================
+    const handleApiKeyInputChange = (rawVal) => {
+        setApiKeyInput(rawVal);
+        const cleaned = sanitizeApiKey(rawVal);
+        // نحفظ النص في التخزين المحلي حتى لا يضيع عند عمل Refresh، لكن لا نكتب "متصل" إلا بعد الفحص الفعلي!
+        if (cleaned.length >= 20) {
+            writeStoredApiKey(cleaned);
+            apiKeyRef.current = cleaned;
+            setUserApiKey(cleaned);
+        }
+    };
+
+    const saveAndTestApiKey = async (keyToVerify) => {
+        const cleaned = sanitizeApiKey(keyToVerify ?? apiKeyInput);
+        if (!cleaned || cleaned.length < 15) {
+            setApiTestStatus("error");
+            setApiStatusMessage("⚠️ يرجى لصق مفتاح Gemini API الصحيح كاملاً (يبدأ بـ AIzaSy) أولاً.");
+            return;
+        }
+
+        // 1. حفظ المفتاح في المتصفح (localStorage + sessionStorage + Cookie) ليبقى بعد الـ Refresh
+        writeStoredApiKey(cleaned);
+        apiKeyRef.current = cleaned;
+        setUserApiKey(cleaned);
+        setApiKeyInput(cleaned);
+        setApiTestStatus("testing");
+        setApiStatusMessage("⏳ جاري الاتصال الفعلي بسيرفرات Google Gemini وفحص المفتاح...");
+
+        try {
+            // 2. اختبار حقيقي مع سيرفر جوجل
+            const winnerModel = await verifyApiKeyWithGoogle(cleaned);
+
+            setActiveModelName(winnerModel);
+            setApiTestStatus("connected");
+            setApiStatusMessage(`✅ متصل فعلياً 100% بسيرفر Google Gemini! (الموديل العامل: ${winnerModel}) — المفتاح محفوظ ولن يُحذف مع Refresh.`);
+            setErrorMsg(null);
+            triggerVaultToast(`تم الاتصال الفعلي بـ ${winnerModel} بنجاح! ⚡`);
+
+            // تصحيح الجملة الحالية فوراً عبر الـ API الحقيقي
+            if (inputText && inputText.trim().length > 1) {
+                lastAnalyzedTextRef.current = "";
+                runInstantCorrection(inputText.trim(), false, cleaned, true);
+            }
+        } catch (err) {
+            const rawErr = err?.message || "خطأ غير معروف";
+            setApiTestStatus("error");
+            if (/INVALID_KEY|API key not valid/i.test(rawErr)) {
+                setApiStatusMessage("❌ مفتاح الـ API غير صحيح (مرفوض من سيرفر جوجل). تأكد من نسخ المفتاح كاملاً من Google AI Studio.");
+            } else if (/FORBIDDEN_KEY|referer|blocked|403/i.test(rawErr)) {
+                setApiStatusMessage(`❌ المفتاح مقيد أو محظور (403): ${rawErr} — قم بإلغاء قيود الموقع (Website Restrictions) من إعدادات المفتاح.`);
+            } else {
+                setApiStatusMessage(`❌ فشل الاتصال الفعلي بالـ API: ${rawErr}`);
+            }
+        }
+    };
+
+    const removeSavedApiKey = () => {
+        writeStoredApiKey("");
+        apiKeyRef.current = "";
+        setUserApiKey("");
+        setApiKeyInput("");
+        setApiTestStatus("missing");
+        setApiStatusMessage("تم حذف المفتاح. الصق مفتاح Gemini API جديداً لتشغيل الذكاء الاصطناعي.");
+        setShowApiPanel(true);
+        triggerVaultToast("تم مسح مفتاح الـ API");
+    };
+
+    const persistVaultItem = async (itemObj) => {
+        setSavedVault((prev) => {
+            const filtered = prev.filter((x) => x.id !== itemObj.id &&
+                normalizeKey(x.correctedGerman) !==
+                    normalizeKey(itemObj.correctedGerman));
+            return [itemObj, ...filtered];
+        });
+        if (user && db) {
+            try {
+                const docRef = doc(db, "artifacts", appId, "users", user.uid, "vault_items", itemObj.id);
+                await setDoc(docRef, itemObj);
+            }
+            catch (_) { }
+        }
+    };
+
+    const isSentenceSaved = (germanSentence) => {
+        if (!germanSentence)
+            return false;
+        const norm = normalizeKey(germanSentence);
+        return savedVault.some((item) => normalizeKey(item.correctedGerman) === norm);
+    };
+
+    const toggleVaultDropdown = (id) => {
+        setExpandedVaultIds((prev) => ({
+            ...prev,
+            [id]: !prev[id]
+        }));
+    };
+
+    const copyTextToClipboard = (text) => {
+        if (!text)
+            return;
+        try {
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand("copy");
+            document.body.removeChild(textarea);
+        }
+        catch (_) { }
+    };
+
+    const buildFallbackSimilarExamples = (germanText, arabicMeaning) => {
+        const clean = (germanText || "").trim();
+        if (!clean)
+            return [];
+        const cached = INSTANT_CACHE.get(normalizeKey(clean));
+        if (cached?.similarExamples?.length > 0)
+            return cached.similarExamples;
+        return [
+            {
+                de: clean,
+                ar: arabicMeaning || "الصيغة الأساسية المعتمدة",
+                tag: "الصيغة الأساسية"
+            },
+            {
+                de: `Könnten Sie mir bitte helfen? ${clean}`,
+                ar: `هل يمكنك مساعدتي من فضلك؟ (${arabicMeaning || ""})`,
+                tag: "رسمي مهذب"
+            },
+            {
+                de: `Ich wollte nur sagen: ${clean}`,
+                ar: `أردت فقط أن أقول: (${arabicMeaning || ""})`,
+                tag: "محادثة يومية"
+            }
+        ];
+    };
+
+    const toggleSaveSentenceToVault = async (sentenceObj, copyAlso = true) => {
+        if (!sentenceObj || !sentenceObj.correctedGerman)
+            return;
+        const norm = normalizeKey(sentenceObj.correctedGerman);
+        const existingItem = savedVault.find((item) => normalizeKey(item.correctedGerman) === norm);
+        if (existingItem) {
+            setSavedVault((prev) => prev.filter((item) => normalizeKey(item.correctedGerman) !== norm));
+            if (user && db) {
+                try {
+                    await deleteDoc(doc(db, "artifacts", appId, "users", user.uid, "vault_items", existingItem.id));
+                }
+                catch (_) { }
+            }
+            triggerVaultToast("تمت إزالة الجملة من الخزنة");
+        }
+        else {
+            if (copyAlso) {
+                copyTextToClipboard(sentenceObj.correctedGerman);
+            }
+            const nowTime = new Date().toLocaleTimeString("ar-EG", {
+                hour: "2-digit",
+                minute: "2-digit"
+            });
+            const newId = `vault-${Date.now()}-${Math.random()
+                .toString(36)
+                .slice(2, 6)}`;
+            const examples = sentenceObj.similarExamples && sentenceObj.similarExamples.length > 0
+                ? sentenceObj.similarExamples
+                : buildFallbackSimilarExamples(sentenceObj.correctedGerman, sentenceObj.arabicMeaning);
+            const newEntry = {
+                id: newId,
+                userSentence: sentenceObj.userSentence || "",
+                correctedGerman: sentenceObj.correctedGerman,
+                arabicMeaning: sentenceObj.arabicMeaning || "",
+                category: sentenceObj.category || "تصحيحات وجمل مهمة",
+                replacedWords: sentenceObj.replacedWords || [],
+                similarExamples: examples,
+                reviewed: false,
+                savedAt: `محفوظة ${nowTime}`,
+                createdAtMs: Date.now()
+            };
+            setExpandedVaultIds((prev) => ({ ...prev, [newId]: true }));
+            await persistVaultItem(newEntry);
+            triggerVaultToast("تم نسخ الجملة وحفظها في الخزنة الدائمة مع بدايلها! 🔖");
+        }
+    };
+
+    const toggleVaultItemReviewed = async (id) => {
+        let updatedItem = null;
+        setSavedVault((prev) => prev.map((item) => {
+            if (item.id === id) {
+                updatedItem = { ...item, reviewed: !item.reviewed };
+                return updatedItem;
+            }
+            return item;
+        }));
+        if (updatedItem && user && db) {
+            try {
+                await setDoc(doc(db, "artifacts", appId, "users", user.uid, "vault_items", updatedItem.id), updatedItem);
+            }
+            catch (_) { }
+        }
+    };
+
+    const deleteVaultItem = async (id) => {
+        setSavedVault((prev) => prev.filter((item) => item.id !== id));
+        if (user && db) {
+            try {
+                await deleteDoc(doc(db, "artifacts", appId, "users", user.uid, "vault_items", id));
+            }
+            catch (_) { }
+        }
+    };
+
+    // =====================================================
+    // ميزة "انسخ وحط في الخزنة وأنا أرتبهالك" (Smart Paste & Auto-Organize)
+    // =====================================================
+    const organizeAndSavePastedText = async (rawInputText) => {
+        const textToProcess = (rawInputText ?? pasteBoxText).trim();
+        if (!textToProcess)
+            return;
+        setIsOrganizingPaste(true);
+        const nowTime = new Date().toLocaleTimeString("ar-EG", {
+            hour: "2-digit",
+            minute: "2-digit"
+        });
+        const rawLines = textToProcess
+            .split(/\n+/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        try {
+            const systemPrompt = `أنت منظم ومصحح خزنة مفردات وجمل ألمانية ذكي للمتحدثين بالعربية.
+المستخدم قام بنسخ ولصق نص (قد يكون كلمة واحدة، أو جملة بها أخطاء، أو عدة جمل بالألمانية أو العربية).
+يجب أن ترجع كائن JSON صالح 100% فقط بدون أي نص خارجه بهذا الهيكل:
+{
+  "items": [
+    {
+      "originalText": "النص الأصلي",
+      "correctedGerman": "الجملة أو الكلمة الألمانية الصحيحة 100% مع أداة التعريف للأسماء",
+      "arabicMeaning": "الترجمة العربية الدقيقة",
+      "category": "محادثة يومية أو سفر أو عمل",
+      "replacedWords": [
+        {
+          "wrongOrArabic": "الكلمة الخاطئة أو العربية",
+          "rightGerman": "الكلمة الألمانية الصحيحة",
+          "arabicMeaning": "معناها بالعربي",
+          "alternatives": [
+            { "de": "بديل ألماني 1", "ar": "معناه" },
+            { "de": "بديل ألماني 2", "ar": "معناه" }
+          ]
+        }
+      ],
+      "similarExamples": [
+        { "de": "جملة بديلة 1 بالألمانية", "ar": "معناها بالعربي", "tag": "بديل شائع" },
+        { "de": "جملة بديلة 2 بالألمانية", "ar": "معناها بالعربي", "tag": "رسمي" },
+        { "de": "جملة بديلة 3 بالألمانية", "ar": "معناها بالعربي", "tag": "يومي" },
+        { "de": "جملة بديلة 4 بالألمانية", "ar": "معناها بالعربي", "tag": "سؤال" }
+      ]
+    }
+  ]
+}`;
+
+            const { parsed } = await callGeminiAPI({
+                activeKey: apiKeyRef.current || userApiKey,
+                userText: textToProcess,
+                systemPrompt,
+                temperature: 0.1
+            });
+
+            if (parsed?.items && parsed.items.length > 0) {
+                for (let i = 0; i < parsed.items.length; i++) {
+                    const it = parsed.items[i];
+                    const newId = `vault-${Date.now()}-${i}-${Math.random()
+                        .toString(36)
+                        .slice(2, 5)}`;
+                    const newEntry = {
+                        id: newId,
+                        userSentence: it.originalText || textToProcess,
+                        correctedGerman: it.correctedGerman,
+                        arabicMeaning: it.arabicMeaning,
+                        category: it.category || "مضاف للحافظة",
+                        replacedWords: it.replacedWords || [],
+                        similarExamples: it.similarExamples && it.similarExamples.length > 0
+                            ? it.similarExamples
+                            : buildFallbackSimilarExamples(it.correctedGerman, it.arabicMeaning),
+                        reviewed: false,
+                        savedAt: `تم ترتيبه ${nowTime}`,
+                        createdAtMs: Date.now() + i
+                    };
+                    setExpandedVaultIds((prev) => ({ ...prev, [newId]: true }));
+                    await persistVaultItem(newEntry);
+                }
+                setPasteBoxText("");
+                setShowPasteBoxDropdown(false);
+                triggerVaultToast(`تم ترتيب وحفظ ${parsed.items.length} عنصر في الخزنة بالذكاء الاصطناعي! ✨`);
+                setIsOrganizingPaste(false);
+                return;
+            }
+        }
+        catch (_) {
+            for (let i = 0; i < rawLines.length; i++) {
+                const line = rawLines[i];
+                const preview = buildLocalInstantPreview(line, null);
+                const newId = `vault-${Date.now()}-${i}`;
+                const newEntry = {
+                    id: newId,
+                    userSentence: line,
+                    correctedGerman: preview?.correctedGerman || line,
+                    arabicMeaning: preview?.arabicMeaning || "تم الحفظ في الخزنة",
+                    category: "مضاف للحافظة",
+                    replacedWords: preview?.replacedWords || [],
+                    similarExamples: buildFallbackSimilarExamples(preview?.correctedGerman || line, preview?.arabicMeaning),
+                    reviewed: false,
+                    savedAt: `محفوظة ${nowTime}`,
+                    createdAtMs: Date.now() + i
+                };
+                setExpandedVaultIds((prev) => ({ ...prev, [newId]: true }));
+                await persistVaultItem(newEntry);
+            }
+            setPasteBoxText("");
+            setShowPasteBoxDropdown(false);
+            triggerVaultToast(apiKeyRef.current ? "تم ترتيب وحفظ النص في الخزنة فوراً! 🔖" : "تم الحفظ المبدئي (اربط الـ API من الأعلى لتوليد البدايل الذكية)");
+        }
+        finally {
+            setIsOrganizingPaste(false);
+        }
+    };
+
+    // توليد المزيد من البدايل المتشابهة لعنصر داخل الخزنة عند الطلب
+    const generateMoreAlternativesForVaultItem = async (vaultItem) => {
+        if (!vaultItem || loadingMoreVaultId)
+            return;
+        const currentKey = apiKeyRef.current || userApiKey || readStoredApiKey();
+        if (!currentKey) {
+            setShowVaultModal(false);
+            setShowApiPanel(true);
+            triggerVaultToast("يرجى ربط مفتاح الـ API أولاً لتوليد بدايل جديدة بالذكاء الاصطناعي 🔑");
+            return;
+        }
+        setLoadingMoreVaultId(vaultItem.id);
+        try {
+            const systemPrompt = `أعطني 6 بدايل وجمل ألمانية متشابهة ومتنوعة (رسمي، يومي، دارج، سؤال، رد، مختصر) للجملة أو الكلمة التالية في نفس السياق مع ترجمتها للعربية.
+أرجع كائن JSON فقط بهذا الشكل:
+{
+  "similarExamples": [
+    { "de": "الجملة بالألمانية", "ar": "الترجمة بالعربية", "tag": "يومي / رسمي / سؤال / بديل شائع" }
+  ]
+}`;
+            const { parsed } = await callGeminiAPI({
+                activeKey: currentKey,
+                userText: vaultItem.correctedGerman,
+                systemPrompt,
+                temperature: 0.25
+            });
+
+            if (parsed?.similarExamples && parsed.similarExamples.length > 0) {
+                const existingDe = new Set((vaultItem.similarExamples || []).map((e) => normalizeKey(e.de)));
+                const mergedExamples = [
+                    ...(vaultItem.similarExamples || []),
+                    ...parsed.similarExamples.filter((e) => !existingDe.has(normalizeKey(e.de)))
+                ];
+                const updatedItem = {
+                    ...vaultItem,
+                    similarExamples: mergedExamples
+                };
+                await persistVaultItem(updatedItem);
+                triggerVaultToast("تم توليد وإضافة بدايل متشابهة جديدة! ✨");
+            }
+        }
+        catch (_) {
+            triggerVaultToast("تأكد من صلاحية مفتاح الـ API المربوط");
+        }
+        finally {
+            setLoadingMoreVaultId(null);
+        }
+    };
+
+    const [selectedWordPopup, setSelectedWordPopup] = useState(null);
+    const [lastArabicMemory, setLastArabicMemory] = useState(INSTANT_CACHE.get("ich möchte تذكرة سفر nach berlin حجز").lastArabicChunk);
+    const [latencyMs, setLatencyMs] = useState(10);
+    const [errorMsg, setErrorMsg] = useState(null);
+    const [isRedBoxCollapsed, setIsRedBoxCollapsed] = useState(false);
+    const [showGoogleSitesModal, setShowGoogleSitesModal] = useState(false);
+    const [copiedEmbed, setCopiedEmbed] = useState(false);
+
+    // حالات الميكروفون اللحظي المستمر والصوت الناطق
+    const [micMode, setMicMode] = useState("off"); // "off" | "de" | "ar"
+    const [liveTranscript, setLiveTranscript] = useState("");
+    const [playingText, setPlayingText] = useState(null);
+    // مهلة التوقف للتصحيح التلقائي السريع (افتراضياً 450ms لسرعة "طلقة ⚡")
+    const [pauseWaitMs, setPauseWaitMs] = useState(450);
+
+    // =====================================================
+    // عداد وقت التحدث الذكي: يحسب فقط الثواني التي تتكلم فيها فعلياً!
+    // =====================================================
+    useEffect(() => {
+        if (micMode === "off") {
+            setIsActivelySpeaking(false);
+            return;
+        }
+        const interval = setInterval(() => {
+            const msSinceLastSpeech = Date.now() - lastVoiceActivityRef.current;
+            const activelyTalkingNow = msSinceLastSpeech <= 1350;
+            setIsActivelySpeaking(activelyTalkingNow);
+
+            // لا نزيد العداد إلا إذا كان المستخدم يتكلم فعلاً!
+            if (activelyTalkingNow) {
+                setTotalSpokenSeconds((prev) => {
+                    const nextVal = prev + 1;
+                    if (user && db && nextVal % 5 === 0) {
+                        const todayId = getTodayStorageKey();
+                        setDoc(doc(db, "artifacts", appId, "users", user.uid, "daily_stats", todayId), { seconds: nextVal, updatedAt: Date.now() }).catch(() => { });
+                    }
+                    return nextVal;
+                });
+            }
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [micMode, user]);
+
+    // مراقب مستوى الصوت من الميكروفون (Web Audio API) لرصد الكلام الفعلي بدقة عالية
+    const startVoiceLevelMonitor = async () => {
+        stopVoiceLevelMonitor();
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true }
+            });
+            audioStreamRef.current = stream;
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            audioContextRef.current = ctx;
+            const source = ctx.createMediaStreamSource(stream);
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            volumeIntervalRef.current = setInterval(() => {
+                if (activeMicModeRef.current === "off") return;
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 2; i < 40; i++) {
+                    sum += dataArray[i];
+                }
+                const avgSpeechBand = sum / 38;
+                // إذا تجاوز مستوى الترددات الصوتية حد الكلام البشري، نسجل نشاطاً صوتياً فعلياً
+                if (avgSpeechBand > 22) {
+                    markActualVoiceActivity();
+                }
+            }, 150);
+        } catch (_) {
+            // في حال عدم توفر Web Audio يعتمد العداد تلقائياً على أحداث SpeechRecognition
+        }
+    };
+
+    const stopVoiceLevelMonitor = () => {
+        if (volumeIntervalRef.current) {
+            clearInterval(volumeIntervalRef.current);
+            volumeIntervalRef.current = null;
+        }
+        if (audioStreamRef.current) {
+            try {
+                audioStreamRef.current.getTracks().forEach((t) => t.stop());
+            } catch (_) {}
+            audioStreamRef.current = null;
+        }
+        if (audioContextRef.current) {
+            try {
+                audioContextRef.current.close();
+            } catch (_) {}
+            audioContextRef.current = null;
+        }
+        setIsActivelySpeaking(false);
+    };
+
+    const updateDailyGoalMinutes = (mins) => {
+        setDailyGoalMinutes(mins);
+        if (user && db) {
+            setDoc(doc(db, "artifacts", appId, "users", user.uid, "daily_stats", "settings"), { goalMinutes: mins }).catch(() => { });
+        }
+    };
+
+    const abortControllerRef = useRef(null);
+    const debounceTimerRef = useRef(null);
+    const liveStreamThrottleRef = useRef(0);
+    const recognitionRef = useRef(null);
+    const activeMicModeRef = useRef("off");
+    const accumulatedSpeechRef = useRef("");
+    const currentInterimRef = useRef("");
+    const lastAnalyzedTextRef = useRef("ich möchte تذكرة سفر nach berlin حجز");
+
+    useEffect(() => {
+        return () => {
+            stopAllRecognition();
+            stopVoiceLevelMonitor();
+            if (abortControllerRef.current)
+                abortControllerRef.current.abort();
+            if (debounceTimerRef.current)
+                clearTimeout(debounceTimerRef.current);
+            if (window.speechSynthesis)
+                window.speechSynthesis.cancel();
+        };
+    }, []);
+
+    const clearCurrentSpeechAndText = () => {
+        if (debounceTimerRef.current)
+            clearTimeout(debounceTimerRef.current);
+        if (abortControllerRef.current)
+            abortControllerRef.current.abort();
+        accumulatedSpeechRef.current = "";
+        currentInterimRef.current = "";
+        lastAnalyzedTextRef.current = "";
+        setLiveTranscript("");
+        setInputText("");
+        setSelectedWordPopup(null);
+        setIsAnalyzing(false);
+        setErrorMsg(null);
+    };
+
+    const archiveCurrentAndStartNewTurn = () => {
+        if (result && result.correctedGerman) {
+            setConversationTurns((prev) => {
+                const lastTurn = prev[prev.length - 1];
+                if (lastTurn &&
+                    normalizeKey(lastTurn.correctedGerman) ===
+                        normalizeKey(result.correctedGerman)) {
+                    return prev;
+                }
+                return [
+                    ...prev,
+                    {
+                        ...result,
+                        id: `turn-${Date.now()}`
+                    }
+                ];
+            });
+        }
+        accumulatedSpeechRef.current = "";
+        currentInterimRef.current = "";
+        lastAnalyzedTextRef.current = "";
+        setLiveTranscript("");
+        setInputText("");
+        setSelectedWordPopup(null);
+    };
+
+    const applyAlternativeWord = (targetTurnId, oldRightGerman, newAltDe) => {
+        if (targetTurnId === "active" && result) {
+            const updatedGerman = result.correctedGerman.replace(new RegExp(oldRightGerman.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), newAltDe);
+            const updatedReplaced = (result.replacedWords || []).map((w) => w.rightGerman.toLowerCase() === oldRightGerman.toLowerCase()
+                ? { ...w, rightGerman: newAltDe }
+                : w);
+            setResult({
+                ...result,
+                correctedGerman: updatedGerman,
+                replacedWords: updatedReplaced
+            });
+        }
+        else {
+            setConversationTurns((prev) => prev.map((turn) => {
+                if (turn.id !== targetTurnId)
+                    return turn;
+                const updatedGerman = turn.correctedGerman.replace(new RegExp(oldRightGerman.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), newAltDe);
+                const updatedReplaced = (turn.replacedWords || []).map((w) => w.rightGerman.toLowerCase() === oldRightGerman.toLowerCase()
+                    ? { ...w, rightGerman: newAltDe }
+                    : w);
+                return {
+                    ...turn,
+                    correctedGerman: updatedGerman,
+                    replacedWords: updatedReplaced
+                };
+            }));
+        }
+        speakGerman(newAltDe);
+        setSelectedWordPopup((prev) => prev ? { ...prev, rightGerman: newAltDe } : null);
+    };
+
+    const syncLastArabicMemory = (resObj) => {
+        if (resObj?.lastArabicChunk?.hasArabic &&
+            resObj.lastArabicChunk.arabicSpoken &&
+            resObj.lastArabicChunk.germanEquivalent) {
+            setLastArabicMemory(resObj.lastArabicChunk);
+            return;
+        }
+        if (resObj?.replacedWords?.length > 0) {
+            const arabicItem = [...resObj.replacedWords]
+                .reverse()
+                .find((w) => /[\u0600-\u06FF]/.test(w.wrongOrArabic));
+            if (arabicItem) {
+                setLastArabicMemory({
+                    hasArabic: true,
+                    arabicSpoken: arabicItem.wrongOrArabic,
+                    germanEquivalent: arabicItem.rightGerman,
+                    arabicPronunciation: ""
+                });
+            }
+        }
+    };
+
+    // ==========================================
+    // 1. محرك التصحيح الفعلي عبر Gemini API (يرجع تصحيحاً حقيقياً لكل جملة)
+    // ==========================================
+    const runInstantCorrection = async (rawText, isBackgroundStream = false, customKeyOverride = null, forceFreshApi = false) => {
+        const trimmed = (rawText || "").trim();
+        if (!trimmed || trimmed.length < 2)
+            return;
+        const norm = normalizeKey(trimmed);
+
+        if (!forceFreshApi && norm === lastAnalyzedTextRef.current && result && !result.isLiveDraft) {
+            return;
+        }
+
+        // استخدام الذاكرة الفورية فقط إذا كانت الجملة مطابقة تماماً ولم يُطلب تحديث مباشر
+        if (!forceFreshApi && INSTANT_CACHE.has(norm)) {
+            if (abortControllerRef.current)
+                abortControllerRef.current.abort();
+            const cached = INSTANT_CACHE.get(norm);
+            lastAnalyzedTextRef.current = norm;
+            setResult({ ...cached, userSentence: trimmed, isLiveDraft: false });
+            syncLastArabicMemory(cached);
+            setLatencyMs(8);
+            setIsAnalyzing(false);
+            setErrorMsg(null);
+            return;
+        }
+
+        const keyToUse = sanitizeApiKey(customKeyOverride || apiKeyRef.current || userApiKey || readStoredApiKey());
+
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        setIsAnalyzing(true);
+        setErrorMsg(null);
+        const startTime = performance.now();
+        const lastSpokenFocus = getLastClauseOrChunk(trimmed);
+
+        const systemPrompt = `أنت مصحح ومترجم ألماني فوري خبير للمتحدثين بالعربية.
+المستخدم كتب أو نطق النص التالي (قد يكون بالعربية بالكامل، أو بالألمانية وبها أخطاء، أو خليطاً بين الألمانية والعربية).
+المطلوب منك تصحيحه وترجمته إلى جملة ألمانية طبيعية وصحيحة 100% وإرجاع كائن JSON صالح فقط بهذا الشكل الدقيق:
+{
+  "isCorrect": false,
+  "correctedGerman": "الجملة الألمانية الصحيحة والطبيعية 100%",
+  "arabicMeaning": "الترجمة العربية الدقيقة للجملة",
+  "lastArabicChunk": {
+    "hasArabic": true,
+    "arabicSpoken": "الكلمة أو العبارة العربية التي قالها المستخدم إن وجدت",
+    "germanEquivalent": "مقابلها الألماني مع أداة التعريف der/die/das للأسماء",
+    "arabicPronunciation": "نطقها بالحروف العربية"
+  },
+  "replacedWords": [
+    {
+      "wrongOrArabic": "الكلمة الخاطئة أو العربية في نص المستخدم",
+      "rightGerman": "الكلمة الألمانية الصحيحة المطابقة حرفياً لما داخل correctedGerman",
+      "arabicMeaning": "معناها بالعربية",
+      "alternatives": [
+        { "de": "بديل ألماني 1", "ar": "معناه بالعربي" },
+        { "de": "بديل ألماني 2", "ar": "معناه بالعربي" },
+        { "de": "بديل ألماني 3", "ar": "معناه بالعربي" }
+      ]
+    }
+  ],
+  "contextAndLogic": "شرح مختصر جداً في جملة واحدة للقاعدة أو سبب التصحيح",
+  "similarExamples": [
+    { "de": "جملة ألمانية شبيهة 1", "ar": "ترجمتها بالعربية", "tag": "بديل شائع" },
+    { "de": "جملة ألمانية شبيهة 2", "ar": "ترجمتها بالعربية", "tag": "يومي" },
+    { "de": "جملة ألمانية شبيهة 3", "ar": "ترجمتها بالعربية", "tag": "رسمي" },
+    { "de": "جملة ألمانية شبيهة 4", "ar": "ترجمتها بالعربية", "tag": "سؤال" }
+  ]
+}
+قواعد صارمة:
+1. ممنوع منعاً باتاً ترك أي حروف عربية داخل correctedGerman! إذا كتب المستخدم جملة عربية، ترجمها بالكامل لألمانية سليمة.
+2. اجعل isCorrect: true فقط إذا كانت الجملة الأصلية بالألمانية بالكامل وصحيحة نحوياً وإملائياً 100%.
+3. اجعل الأمثلة في similarExamples مرتبطة بـ: "${lastSpokenFocus}".`;
+
+        try {
+            const { parsed, usedModel } = await callGeminiAPI({
+                activeKey: keyToUse,
+                userText: trimmed,
+                systemPrompt,
+                temperature: 0.1,
+                signal: controller.signal
+            });
+
+            const elapsed = Math.max(45, Math.round(performance.now() - startTime));
+            const finalResult = {
+                isCorrect: Boolean(parsed.isCorrect),
+                correctedGerman: parsed.correctedGerman || trimmed,
+                arabicMeaning: parsed.arabicMeaning || "",
+                lastArabicChunk: parsed.lastArabicChunk || {
+                    hasArabic: false,
+                    arabicSpoken: "",
+                    germanEquivalent: "",
+                    arabicPronunciation: ""
+                },
+                replacedWords: Array.isArray(parsed.replacedWords) ? parsed.replacedWords : [],
+                contextAndLogic: parsed.contextAndLogic || "تم التصحيح والتحليل الفوري بواسطة Gemini AI.",
+                similarExamples: Array.isArray(parsed.similarExamples) ? parsed.similarExamples : [],
+                userSentence: trimmed,
+                isLiveDraft: false,
+                aiVerifiedModel: usedModel || activeModelName,
+                aiLatencyMs: elapsed
+            };
+
+            INSTANT_CACHE.set(norm, finalResult);
+            lastAnalyzedTextRef.current = norm;
+            setResult(finalResult);
+            syncLastArabicMemory(finalResult);
+            setLatencyMs(elapsed);
+            if (usedModel) setActiveModelName(usedModel);
+            if (keyToUse) {
+                setApiTestStatus("connected");
+            }
+            setErrorMsg(null);
+        }
+        catch (err) {
+            if (err.name === "AbortError")
+                return;
+            const rawErr = err?.message || "";
+            if (rawErr === "NO_API_KEY") {
+                setApiTestStatus("missing");
+                setShowApiPanel(true);
+                setErrorMsg("🔑 الموقع يحتاج إلى مفتاح Gemini API لتصحيح الجمل الجديدة. الصق مفتاحك في خانة (ربط الـ API) بالأعلى واضغط (حفظ واختبار الاتصال).");
+            } else if (/INVALID_KEY|FORBIDDEN_KEY/i.test(rawErr)) {
+                setApiTestStatus("error");
+                setShowApiPanel(true);
+                setErrorMsg(`❌ خطأ في مفتاح الـ API: ${rawErr}`);
+            } else {
+                setErrorMsg(`⚠️ فشل طلب التصحيح من السيرفر (${rawErr}). اضغط (صحح الآن ⚡) للمحاولة مرة أخرى.`);
+            }
+        }
+        finally {
+            if (abortControllerRef.current === controller) {
+                setIsAnalyzing(false);
+            }
+        }
+    };
+
+    // ==========================================
+    // مراقبة النص: عدم قتل الطلبات الجارية وإرسال التصحيح الحقيقي للـ API فور التوقف عن الكتابة أو الكلام
+    // ==========================================
+    const handleTextChange = (newText, options = {}) => {
+        const { immediate = false, isSpeakingLive = false } = options;
+        setInputText(newText);
+        if (debounceTimerRef.current)
+            clearTimeout(debounceTimerRef.current);
+        const trimmed = (newText || "").trim();
+        if (!trimmed) {
+            setIsAnalyzing(false);
+            return;
+        }
+        const norm = normalizeKey(trimmed);
+        if (INSTANT_CACHE.has(norm)) {
+            runInstantCorrection(trimmed);
+            return;
+        }
+
+        // تحديث الكلمات العربية المعروفة في الذاكرة اللحظية فقط دون تزييف المربع الأخضر بالجملة الخاطئة
+        const localPreview = buildLocalInstantPreview(trimmed, result);
+        if (localPreview?.lastArabicChunk?.hasArabic) {
+            syncLastArabicMemory(localPreview);
+        }
+
+        const waitTime = immediate
+            ? 10
+            : isSpeakingLive
+                ? pauseWaitMs
+                : 450;
+        debounceTimerRef.current = setTimeout(() => {
+            runInstantCorrection(trimmed, false, null, true);
+        }, waitTime);
+    };
+
+    // ==========================================
+    // 2. الميكروفون اللحظي المستمر مع رصد الكلام الفعلي فقط للعداد
+    // ==========================================
+    const stopAllRecognition = () => {
+        activeMicModeRef.current = "off";
+        currentInterimRef.current = "";
+        stopVoiceLevelMonitor();
+        if (recognitionRef.current) {
+            try {
+                recognitionRef.current.onend = null;
+                recognitionRef.current.onerror = null;
+                recognitionRef.current.stop();
+            }
+            catch (_) { }
+            recognitionRef.current = null;
+        }
+        setMicMode("off");
+        setLiveTranscript("");
+    };
+
+    const startLiveSpeech = (langCode = "de") => {
+        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRec) {
+            setErrorMsg("متصفحك لا يدعم التعرف الصوتي، يمكنك الكتابة وسيتم التصحيح تلقائياً فوراً.");
+            return;
+        }
+        if (activeMicModeRef.current === langCode) {
+            stopAllRecognition();
+            if (inputText.trim()) {
+                runInstantCorrection(inputText.trim(), false, null, true);
+            }
+            return;
+        }
+        if (recognitionRef.current) {
+            try {
+                recognitionRef.current.onend = null;
+                recognitionRef.current.stop();
+            }
+            catch (_) { }
+            recognitionRef.current = null;
+        }
+        setErrorMsg(null);
+        activeMicModeRef.current = langCode;
+        setMicMode(langCode);
+        // تشغيل حساس الصوت لرصد الكلام الفعلي فقط وعدم احتساب وقت الصمت
+        startVoiceLevelMonitor();
+
+        const isDefaultSentence = normalizeKey(inputText) === "ich möchte تذكرة سفر nach berlin حجز";
+        if (langCode === "de" && isDefaultSentence) {
+            accumulatedSpeechRef.current = "";
+            setInputText("");
+        }
+        else {
+            accumulatedSpeechRef.current = inputText.trim();
+        }
+        const launchRecognitionInstance = () => {
+            if (activeMicModeRef.current === "off")
+                return;
+            const rec = new SpeechRec();
+            const currentMode = activeMicModeRef.current;
+            rec.lang = currentMode === "ar" ? "ar-EG" : "de-DE";
+            rec.continuous = true;
+            rec.interimResults = true;
+            rec.maxAlternatives = 1;
+
+            rec.onspeechstart = () => {
+                markActualVoiceActivity();
+            };
+
+            rec.onresult = (event) => {
+                // المستخدم ينطق كلمات فعلية الآن -> نسجل نشاطاً صوتياً للعداد
+                markActualVoiceActivity();
+
+                let sessionFinal = "";
+                let sessionInterim = "";
+                for (let i = 0; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        sessionFinal += transcript + " ";
+                    }
+                    else {
+                        sessionInterim += transcript;
+                    }
+                }
+                const currentSessionText = `${sessionFinal}${sessionInterim}`.trim();
+                currentInterimRef.current = currentSessionText;
+                setLiveTranscript(sessionInterim || sessionFinal);
+                if (currentSessionText) {
+                    const fullCombined = accumulatedSpeechRef.current
+                        ? `${accumulatedSpeechRef.current} ${currentSessionText}`.trim()
+                        : currentSessionText;
+                    handleTextChange(fullCombined, {
+                        immediate: false,
+                        isSpeakingLive: true
+                    });
+                }
+            };
+            rec.onerror = (e) => {
+                if (e.error === "no-speech") {
+                    return;
+                }
+                if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+                    stopAllRecognition();
+                    setErrorMsg("يرجى السماح بصلاحية الميكروفون في المتصفح.");
+                }
+            };
+            rec.onend = () => {
+                if (currentInterimRef.current) {
+                    accumulatedSpeechRef.current = accumulatedSpeechRef.current
+                        ? `${accumulatedSpeechRef.current} ${currentInterimRef.current}`.trim()
+                        : currentInterimRef.current;
+                    currentInterimRef.current = "";
+                }
+                if (activeMicModeRef.current !== "off") {
+                    try {
+                        launchRecognitionInstance();
+                    }
+                    catch (_) {
+                        setMicMode("off");
+                        activeMicModeRef.current = "off";
+                    }
+                }
+                else {
+                    setLiveTranscript("");
+                }
+            };
+            recognitionRef.current = rec;
+            try {
+                rec.start();
+            }
+            catch (_) { }
+        };
+        launchRecognitionInstance();
+    };
+
+    // ==========================================
+    // 3. نظام تشغيل وإيقاف/قفل الصوت الفوري (Stop Audio Anywhere)
+    // ==========================================
+    const stopSpeaking = () => {
+        if ("speechSynthesis" in window) {
+            window.speechSynthesis.cancel();
+        }
+        setPlayingText(null);
+    };
+
+    const speakGerman = (text) => {
+        if (activeMicModeRef.current !== "off" || micMode !== "off") {
+            stopAllRecognition();
+        }
+        if (!text || !("speechSynthesis" in window))
+            return;
+
+        // إذا كانت هذه الجملة شغالة الآن وضغط عليها المستخدم مرة أخرى، نقفل الصوت فوراً!
+        if (playingText === text) {
+            stopSpeaking();
+            return;
+        }
+
+        window.speechSynthesis.cancel();
+        setPlayingText(text);
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = "de-DE";
+        u.rate = 0.95;
+        u.onend = () => setPlayingText(null);
+        u.onerror = () => setPlayingText(null);
+        window.speechSynthesis.speak(u);
+    };
+
+    const getGoogleSitesEmbedHtml = () => {
+        return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>مصحح الألمانية الطلقة 🇩🇪</title>
+  <script src="https://cdn.tailwindcss.com"><\/script>
+</head>
+<body class="bg-slate-950 text-slate-100 p-4 font-sans">
+  <div class="max-w-3xl mx-auto space-y-4">
+    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+      <h1 class="text-xl font-extrabold text-white">مصحح الألمانية الطلقة 🇩🇪 (نسخة Google Sites)</h1>
+      <span class="text-xs bg-amber-500/20 text-amber-300 px-3 py-1 rounded-full font-bold">تصحيح وترجمة فورية ⚡</span>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex flex-wrap gap-2">
+      <button id="micBtn" class="bg-amber-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-sm">🎙️ اتكلم ألماني</button>
+      <input id="userInput" dir="auto" value="${(inputText || "").replace(/"/g, "&quot;")}" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white" placeholder="اكتب أو اتكلم ألماني أو عربي..." />
+      <button id="clearBtn" class="bg-rose-600 text-white font-bold px-3 py-2.5 rounded-xl text-sm">🗑️ مسح الكلام</button>
+      <button id="speakBtn" class="bg-emerald-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-sm">🔊 نطق</button>
+      <button id="stopSpeakBtn" class="bg-red-600 text-white font-bold px-4 py-2.5 rounded-xl text-sm">⏹️ قفل الصوت</button>
+    </div>
+    <div id="redBox" class="bg-red-950/70 border-2 border-red-500 rounded-2xl p-4 ${result?.isCorrect ? "hidden" : ""}">
+      <div class="text-xs text-red-300 font-bold mb-1">❌ ما قلته (اضغط على الخطأ لمعرفة الصح):</div>
+      <div id="wrongText" dir="auto" class="text-lg font-bold text-red-100 text-left">${result?.userSentence || ""}</div>
+    </div>
+    <div class="bg-emerald-950/80 border-2 border-emerald-500 rounded-3xl p-5 space-y-3">
+      <div class="text-xs text-emerald-300 font-bold">✅ المحادثة والتصحيح الفوري بالألمانية:</div>
+      <div id="rightText" dir="ltr" class="text-2xl font-black text-emerald-300 text-left cursor-pointer">${result?.correctedGerman || ""}</div>
+      <div id="arText" class="text-sm font-bold text-emerald-100 pt-2 border-t border-emerald-500/30">الترجمة: ${result?.arabicMeaning || ""}</div>
+    </div>
+  </div>
+  <script>
+    const speakBtn = document.getElementById('speakBtn');
+    const stopSpeakBtn = document.getElementById('stopSpeakBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const micBtn = document.getElementById('micBtn');
+    const userInput = document.getElementById('userInput');
+    const rightText = document.getElementById('rightText');
+    let rec = null;
+    clearBtn.onclick = () => { userInput.value = ''; };
+    stopSpeakBtn.onclick = () => { window.speechSynthesis.cancel(); };
+    speakBtn.onclick = () => {
+      if (rec) { try { rec.stop(); } catch(e){} }
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(rightText.innerText);
+      u.lang = 'de-DE';
+      window.speechSynthesis.speak(u);
+    };
+    rightText.onclick = () => {
+      if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+      } else {
+        speakBtn.onclick();
+      }
+    };
+    micBtn.onclick = () => {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) return;
+      rec = new SR();
+      rec.lang = 'de-DE';
+      rec.onresult = (e) => { userInput.value = e.results[0][0].transcript; };
+      rec.start();
+    };
+  <\/script>
+</body>
+</html>`;
+    };
+
+    const copyGoogleSitesCode = () => {
+        const code = getGoogleSitesEmbedHtml();
+        const textarea = document.createElement("textarea");
+        textarea.value = code;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        setCopiedEmbed(true);
+        setTimeout(() => setCopiedEmbed(false), 2500);
+    };
+
+    // ==========================================
+    // تظليل الكلمات الخاطئة أو العربية بالأحمر داخل الجملة الحمراء
+    // ==========================================
+    const renderHighlightedWrongSentence = (sentence, replacedWords = []) => {
+        if (!sentence)
+            return null;
+        if (!replacedWords || replacedWords.length === 0) {
+            return React.createElement("span", null, sentence);
+        }
+        let parts = [sentence];
+        let keyCounter = 0;
+        replacedWords.forEach((wordObj, wordIdx) => {
+            const { wrongOrArabic } = wordObj;
+            const target = (wrongOrArabic || "").trim();
+            if (!target)
+                return;
+            const nextParts = [];
+            parts.forEach((part) => {
+                if (typeof part !== "string") {
+                    nextParts.push(part);
+                    return;
+                }
+                const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                const regex = new RegExp(`(${escaped})`, "gi");
+                const split = part.split(regex);
+                split.forEach((chunk) => {
+                    if (chunk.toLowerCase() === target.toLowerCase()) {
+                        keyCounter += 1;
+                        const details = getInstantWordDetails(wordObj);
+                        const isSelected = selectedWordPopup &&
+                            selectedWordPopup.turnId === "active" &&
+                            selectedWordPopup.rightGerman?.toLowerCase() ===
+                                wordObj.rightGerman?.toLowerCase();
+                        nextParts.push(React.createElement("button", { type: "button", key: `wrong-${wordIdx}-${keyCounter}`, onClick: (e) => {
+                                e.stopPropagation();
+                                setSelectedWordPopup(isSelected
+                                    ? null
+                                    : {
+                                        ...details,
+                                        turnId: "active"
+                                    });
+                                speakGerman(wordObj.rightGerman);
+                            }, title: `اضغط لرؤية الصح (${wordObj.rightGerman}) ومعناها وبدائلها فوراً`, className: `px-2 py-0.5 rounded-lg underline decoration-wavy mx-0.5 font-extrabold inline-flex items-center gap-1 transition-all cursor-pointer active:scale-95 ${isSelected
+                                ? "bg-amber-400 text-slate-950 decoration-slate-950 ring-4 ring-amber-400/40"
+                                : "bg-red-500/40 hover:bg-red-500/60 text-red-100 decoration-red-300 border border-red-400/60"}` },
+                            React.createElement("span", null, chunk),
+                            React.createElement("span", { className: "text-[11px] bg-emerald-500 text-slate-950 font-black px-1.5 py-0.2 rounded-md no-underline" },
+                                "\u2713 \u0627\u0644\u0635\u062D: ",
+                                wordObj.rightGerman)));
+                    }
+                    else if (chunk) {
+                        nextParts.push(chunk);
+                    }
+                });
+            });
+            parts = nextParts;
+        });
+        return parts;
+    };
+
+    // ==========================================
+    // تظليل الكلمات المصححة باللون الأخضر وعلامة (✓)
+    // ==========================================
+    const renderHighlightedCorrectSentence = (sentence, replacedWords = [], turnId = "active") => {
+        if (!sentence)
+            return null;
+        if (!replacedWords || replacedWords.length === 0) {
+            return React.createElement("span", null, sentence);
+        }
+        const validRightWords = [...replacedWords]
+            .filter((item) => item?.rightGerman && item.rightGerman.trim().length > 0)
+            .sort((a, b) => b.rightGerman.length - a.rightGerman.length);
+        let parts = [sentence];
+        let keyCounter = 0;
+        validRightWords.forEach((wordObj, wordIdx) => {
+            const { rightGerman } = wordObj;
+            const target = rightGerman.trim();
+            if (!target)
+                return;
+            const nextParts = [];
+            parts.forEach((part) => {
+                if (typeof part !== "string") {
+                    nextParts.push(part);
+                    return;
+                }
+                const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                const regex = new RegExp(`(${escaped})`, "gi");
+                const split = part.split(regex);
+                split.forEach((chunk) => {
+                    if (chunk.toLowerCase() === target.toLowerCase()) {
+                        keyCounter += 1;
+                        const details = getInstantWordDetails(wordObj);
+                        const isSelected = selectedWordPopup &&
+                            selectedWordPopup.turnId === turnId &&
+                            selectedWordPopup.rightGerman.toLowerCase() ===
+                                target.toLowerCase();
+                        nextParts.push(React.createElement("button", { type: "button", key: `right-${turnId}-${wordIdx}-${keyCounter}`, onClick: (e) => {
+                                e.stopPropagation();
+                                setSelectedWordPopup(isSelected
+                                    ? null
+                                    : {
+                                        ...details,
+                                        turnId
+                                    });
+                                speakGerman(chunk);
+                            }, title: "\u0627\u0636\u063A\u0637 \u0644\u0639\u0631\u0636 \u0627\u0644\u0645\u0639\u0646\u0649 \u0628\u0627\u0644\u0639\u0631\u0628\u064A \u0648\u0627\u0644\u0628\u062F\u0627\u0626\u0644 \u0627\u0644\u0623\u0644\u0645\u0627\u0646\u064A\u0629 \u0641\u0648\u0631\u0627\u064B", className: `px-2.5 py-0.5 rounded-xl border-2 underline decoration-2 font-black shadow-md inline-flex items-center gap-1 mx-1 transition-all cursor-pointer active:scale-95 ${isSelected
+                                ? "bg-amber-400 text-slate-950 border-amber-200 decoration-slate-950 ring-4 ring-amber-400/30"
+                                : "bg-emerald-400/30 hover:bg-emerald-400/45 text-emerald-100 border-emerald-400/80 decoration-emerald-300"}` },
+                            React.createElement(Check, { className: `w-4 h-4 stroke-[3] shrink-0 ${isSelected ? "text-slate-950" : "text-emerald-300"}` }),
+                            React.createElement("span", null, chunk),
+                            React.createElement(ChevronDown, { className: `w-3.5 h-3.5 shrink-0 transition-transform ${isSelected
+                                    ? "rotate-180 text-slate-950"
+                                    : "text-emerald-300/90"}` })));
+                    }
+                    else if (chunk) {
+                        nextParts.push(chunk);
+                    }
+                });
+            });
+            parts = nextParts;
+        });
+        return parts;
+    };
+
+    const goalTotalSeconds = Math.max(60, dailyGoalMinutes * 60);
+    const progressPercent = Math.min(100, Math.round((totalSpokenSeconds / goalTotalSeconds) * 100));
+    const filteredVaultItems = savedVault.filter((item) => {
+        if (vaultFilter === "unreviewed" && item.reviewed)
+            return false;
+        if (vaultFilter === "reviewed" && !item.reviewed)
+            return false;
+        if (vaultSearchQuery.trim()) {
+            const q = vaultSearchQuery.trim().toLowerCase();
+            const matchDe = (item.correctedGerman || "").toLowerCase().includes(q);
+            const matchAr = (item.arabicMeaning || "").toLowerCase().includes(q);
+            const matchOrig = (item.userSentence || "").toLowerCase().includes(q);
+            const matchCat = (item.category || "").toLowerCase().includes(q);
+            return matchDe || matchAr || matchOrig || matchCat;
+        }
+        return true;
+    });
+
+    return (React.createElement("div", { dir: "rtl", className: "min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center py-2.5 px-2 sm:px-4 font-sans pb-16" },
+        React.createElement("div", { className: "w-full max-w-4xl space-y-2.5" },
+            // ==========================================
+            // الشريط العلوي (يحتوي على زر ربط الـ API وزر قفل الصوت الفوري)
+            // ==========================================
+            React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 bg-slate-900/90 border border-slate-800/90 rounded-2xl px-3 py-2 shadow-md" },
+                React.createElement("div", { className: "flex items-center gap-2" },
+                    React.createElement("h1", { className: "text-base sm:text-lg font-black text-white tracking-tight flex items-center gap-1.5" },
+                        React.createElement("span", null, "\u0645\u0635\u062D\u062D \u0627\u0644\u0623\u0644\u0645\u0627\u0646\u064A\u0629 \u0627\u0644\u0637\u0644\u0642\u0629"),
+                        React.createElement("span", null, "\uD83C\uDDE9\uD83C\uDDEA")),
+                    React.createElement("div", { className: "flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded-full text-[11px] font-bold" },
+                        React.createElement(Zap, { className: "w-3 h-3 fill-amber-400 text-amber-400" }),
+                        React.createElement("span", null, isAnalyzing ? "جاري التحليل ⚡" : `${(latencyMs / 1000).toFixed(2)}ث`))),
+                React.createElement("div", { className: "flex flex-wrap items-center gap-1.5" },
+                    // زر قفل الصوت العلوي يظهر فوراً عندما يكون أي صوت شغال
+                    playingText && (React.createElement("button", { type: "button", onClick: stopSpeaking, className: "flex items-center gap-1.5 bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded-xl text-xs font-black transition-all shadow-lg ring-2 ring-red-400/50 animate-pulse cursor-pointer active:scale-95", title: "\u0625\u064A\u0642\u0627\u0641 \u0648\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A \u0641\u0648\u0631\u0627\u064B" },
+                        React.createElement(VolumeX, { className: "w-3.5 h-3.5" }),
+                        React.createElement("span", null, "\u23F9\uFE0F \u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))),
+                    // زر فتح/قفل خانة ربط الـ API
+                    React.createElement("button", { type: "button", onClick: () => setShowApiPanel((prev) => !prev), className: `flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black border transition-all shadow cursor-pointer active:scale-95 ${userApiKey && apiTestStatus === "connected"
+                            ? "bg-emerald-500/20 hover:bg-emerald-500/30 border-emerald-400/60 text-emerald-300"
+                            : "bg-rose-600 hover:bg-rose-500 border-rose-300 text-white animate-pulse"}`, title: "\u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0631\u0628\u0637 \u0645\u0641\u062A\u0627\u062D \u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064A Gemini API" },
+                        React.createElement(Key, { className: "w-3.5 h-3.5" }),
+                        React.createElement("span", null, userApiKey && apiTestStatus === "connected" ? `الـ API متصل (${activeModelName})` : "🔑 ربط الـ API")),
+                    React.createElement("button", { type: "button", onClick: () => setShowVaultModal(true), className: "flex items-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 px-3 py-1.5 rounded-xl text-xs font-black transition-all shadow cursor-pointer active:scale-95", title: "\u0627\u0641\u062A\u062D \u0627\u0644\u062E\u0632\u0646\u0629 \u0648\u0627\u0644\u062D\u0627\u0641\u0638\u0629 \u0627\u0644\u062F\u0627\u0626\u0645\u0629" },
+                        React.createElement(Bookmark, { className: "w-3.5 h-3.5 fill-slate-950" }),
+                        React.createElement("span", null,
+                            "\u0627\u0644\u062E\u0632\u0646\u0629 (",
+                            savedVault.length,
+                            ")")),
+                    React.createElement("button", { type: "button", onClick: () => setShowSpeakingTimerModal(true), className: `flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-extrabold border transition-all cursor-pointer active:scale-95 ${isActivelySpeaking
+                            ? "bg-emerald-500/30 border-emerald-400 text-emerald-200 ring-2 ring-emerald-400/40"
+                            : micMode !== "off"
+                                ? "bg-amber-500/15 border-amber-400/60 text-amber-200"
+                                : progressPercent >= 100
+                                    ? "bg-emerald-500/20 border-emerald-400/60 text-emerald-200"
+                                    : "bg-slate-950 hover:bg-slate-800 border-slate-700 text-slate-100"}`, title: "\u064A\u062D\u0633\u0628 \u0641\u0642\u0637 \u0627\u0644\u062B\u0648\u0627\u0646\u064A \u0627\u0644\u062A\u064A \u062A\u062A\u0643\u0644\u0645 \u0641\u064A\u0647\u0627 \u0641\u0639\u0644\u064A\u0627\u064B (\u064A\u062A\u0648\u0642\u0641 \u062A\u0644\u0642\u0627\u0626\u064A\u0627\u064B \u0623\u062B\u0646\u0627\u0621 \u0627\u0644\u0635\u0645\u062A)" },
+                        React.createElement(Clock, { className: `w-3.5 h-3.5 ${isActivelySpeaking ? "text-emerald-300 animate-spin" : "text-amber-400"}` }),
+                        React.createElement("span", { dir: "ltr", className: "font-black text-amber-300" }, formatDuration(totalSpokenSeconds)),
+                        micMode !== "off" && (React.createElement("span", { className: `text-[10px] px-1.5 py-0.2 rounded font-black ${isActivelySpeaking ? "bg-emerald-400 text-slate-950" : "bg-slate-800 text-slate-400"}` }, isActivelySpeaking ? "🗣️ يحسب" : "⏸️ صامت")),
+                        React.createElement("span", { className: "text-[10px] text-slate-400 hidden sm:inline" },
+                            "/",
+                            dailyGoalMinutes,
+                            "\u062F")),
+                    React.createElement("button", { type: "button", onClick: () => setShowGoogleSitesModal(true), className: "flex items-center gap-1 bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-400/30 text-indigo-200 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all", title: "\u0643\u0648\u062F \u0627\u0644\u062A\u0636\u0645\u064A\u0646 \u0641\u064A Google Sites" },
+                        React.createElement(Globe, { className: "w-3.5 h-3.5 text-indigo-300" }),
+                        React.createElement("span", { className: "hidden md:inline" }, "Google Sites")))),
+
+            // ==========================================
+            // خانة ربط واختبار الـ API (حفظ تلقائي 100% لا يضيع مع الـ Refresh)
+            // ==========================================
+            showApiPanel && (React.createElement("div", { className: `rounded-2xl p-3.5 border-2 shadow-xl space-y-2.5 transition-all animate-in fade-in duration-150 ${apiTestStatus === "connected" && userApiKey
+                    ? "bg-emerald-950/50 border-emerald-500/70"
+                    : "bg-slate-900 border-amber-400"}` },
+                React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
+                    React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                        React.createElement("span", { className: "inline-flex items-center gap-1.5 text-xs font-black bg-amber-400 text-slate-950 px-2.5 py-1 rounded-xl" },
+                            React.createElement(Key, { className: "w-3.5 h-3.5" }),
+                            React.createElement("span", null, "\u0631\u0628\u0637 \u0627\u0644\u0640 API \u0627\u0644\u0641\u0648\u0631\u064A (\u064A\u064F\u062D\u0641\u0638 \u062F\u0627\u0626\u0645\u0627\u064B \u0648\u0644\u0627 \u064A\u064F\u062D\u0630\u0641 \u0645\u0639 Refresh)")),
+                        React.createElement("a", { href: "https://aistudio.google.com/app/apikey", target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1 text-xs font-extrabold text-amber-300 hover:text-amber-200 underline bg-slate-950 px-2.5 py-1 rounded-xl border border-amber-400/40" },
+                            React.createElement("span", null, "\u0627\u062D\u0635\u0644 \u0639\u0644\u0649 \u0645\u0641\u062A\u0627\u062D Gemini API \u0645\u062C\u0627\u0646\u064A \u0645\u0646 Google AI Studio"),
+                            React.createElement(ExternalLink, { className: "w-3 h-3" }))),
+                    React.createElement("button", { type: "button", onClick: () => setShowApiPanel(false), className: "text-xs font-bold text-slate-300 hover:text-white bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-800 flex items-center gap-1" },
+                        React.createElement("span", null, "\u0625\u062E\u0641\u0627\u0621"),
+                        React.createElement(X, { className: "w-3.5 h-3.5" }))),
+                React.createElement("div", { className: "flex flex-col sm:flex-row items-stretch sm:items-center gap-2" },
+                    React.createElement("div", { className: "relative flex-1" },
+                        React.createElement("input", { dir: "ltr", type: showApiKeySecret ? "text" : "password", value: apiKeyInput, onChange: (e) => handleApiKeyInputChange(e.target.value), onPaste: (e) => {
+                                const pasted = e.clipboardData?.getData("text") || "";
+                                if (pasted.trim()) {
+                                    setTimeout(() => saveAndTestApiKey(pasted.trim()), 20);
+                                }
+                            }, onKeyDown: (e) => {
+                                if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    saveAndTestApiKey(apiKeyInput);
+                                }
+                            }, placeholder: "AIzaSy... \u0627\u0644\u0635\u0642 \u0645\u0641\u062A\u0627\u062D Gemini API \u0647\u0646\u0627 (\u0633\u064A\u062A\u0645 \u062D\u0641\u0638\u0647 \u0648\u0631\u0628\u0637\u0647 \u0641\u0648\u0631\u0627\u064B)", className: "w-full h-10 bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl pl-3 pr-10 text-xs sm:text-sm font-mono text-emerald-300 placeholder-slate-500 focus:outline-none" }),
+                        React.createElement("button", { type: "button", onClick: () => setShowApiKeySecret((prev) => !prev), className: "absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white", title: showApiKeySecret ? "إخفاء المفتاح" : "إظهار المفتاح" }, showApiKeySecret ? (React.createElement(EyeOff, { className: "w-4 h-4" })) : (React.createElement(Eye, { className: "w-4 h-4" })))),
+                    React.createElement("div", { className: "flex flex-wrap items-center gap-1.5 shrink-0" },
+                        React.createElement("button", { type: "button", onClick: async () => {
+                                try {
+                                    if (navigator.clipboard?.readText) {
+                                        const txt = await navigator.clipboard.readText();
+                                        if (txt && txt.trim()) {
+                                            setApiKeyInput(txt.trim());
+                                            saveAndTestApiKey(txt.trim());
+                                            return;
+                                        }
+                                    }
+                                } catch (_) {}
+                                triggerVaultToast("الصق المفتاح في الخانة بـ Ctrl+V ثم اضغط حفظ واختبار");
+                            }, className: "h-10 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-400/30 font-bold text-xs flex items-center gap-1 cursor-pointer" },
+                            React.createElement(ClipboardPaste, { className: "w-3.5 h-3.5" }),
+                            React.createElement("span", null, "\u0644\u0635\u0642 \u0648\u0627\u062E\u062A\u0628\u0627\u0631")),
+                        React.createElement("button", { type: "button", disabled: apiTestStatus === "testing", onClick: () => saveAndTestApiKey(apiKeyInput), className: "h-10 px-4 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow cursor-pointer active:scale-95" },
+                            apiTestStatus === "testing" ? (React.createElement(Loader2, { className: "w-4 h-4 animate-spin" })) : (React.createElement(CheckCircle2, { className: "w-4 h-4" })),
+                            React.createElement("span", null, apiTestStatus === "testing" ? "جاري الفحص..." : "حفظ واختبار الاتصال 🔌")),
+                        userApiKey && (React.createElement("button", { type: "button", onClick: removeSavedApiKey, className: "h-10 px-3 rounded-xl bg-rose-600/80 hover:bg-rose-600 text-white font-bold text-xs flex items-center gap-1 cursor-pointer", title: "\u062D\u0630\u0641 \u0627\u0644\u0645\u0641\u062A\u0627\u062D \u0627\u0644\u062D\u0627\u0644\u064A" },
+                            React.createElement(Trash2, { className: "w-3.5 h-3.5" }),
+                            React.createElement("span", null, "\u062D\u0630\u0641"))))),
+                (apiStatusMessage || userApiKey) && (React.createElement("div", { className: `text-xs font-bold px-3 py-2 rounded-xl flex flex-wrap items-center justify-between gap-2 ${apiTestStatus === "connected"
+                        ? "bg-emerald-500/20 text-emerald-200 border border-emerald-500/40"
+                        : apiTestStatus === "error"
+                            ? "bg-red-500/20 text-red-200 border border-red-500/40"
+                            : "bg-slate-950 text-amber-200 border border-slate-800"}` },
+                    React.createElement("span", null, apiStatusMessage || `✅ مفتاح الـ API محفوظ ومتصل (الموديل النشط: ${activeModelName})`),
+                    userApiKey && apiTestStatus === "connected" && (React.createElement("span", { className: "text-[11px] bg-emerald-400 text-slate-950 font-black px-2 py-0.5 rounded-md shrink-0" }, "\u0634\u063A\u0627\u0644 100%")))))),
+
+            vaultToastMsg && (React.createElement("div", { className: "fixed bottom-16 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-2xl border border-emerald-200 flex items-center gap-2 animate-in fade-in duration-150" },
+                React.createElement(CheckCircle2, { className: "w-4 h-4 shrink-0" }),
+                React.createElement("span", null, vaultToastMsg))),
+
+            // شريط عائم في أسفل الشاشة لقفل الصوت في أي لحظة عندما يكون هناك صوت يعمل
+            playingText && (React.createElement("div", { className: "fixed bottom-3 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border-2 border-red-500 rounded-2xl px-4 py-2 shadow-2xl flex items-center gap-3 animate-in fade-in duration-150" },
+                React.createElement("div", { className: "flex items-center gap-1.5 text-xs font-bold text-emerald-300 max-w-[200px] sm:max-w-xs truncate", dir: "ltr" },
+                    React.createElement(Volume2, { className: "w-4 h-4 text-emerald-400 animate-bounce shrink-0" }),
+                    React.createElement("span", { className: "truncate" }, playingText)),
+                React.createElement("button", { type: "button", onClick: stopSpeaking, className: "bg-red-600 hover:bg-red-500 text-white font-black text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-lg cursor-pointer active:scale-95 shrink-0" },
+                    React.createElement(Square, { className: "w-3.5 h-3.5 fill-white" }),
+                    React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A \u23F9\uFE0F")))),
+
+            React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-2xl p-2 shadow-lg space-y-1.5" },
+                React.createElement("div", { className: "flex flex-wrap sm:flex-nowrap items-center gap-1.5" },
+                    React.createElement("button", { type: "button", onClick: () => startLiveSpeech("de"), className: `h-10 px-3 rounded-xl flex items-center gap-1.5 font-extrabold text-xs shrink-0 transition-all shadow cursor-pointer ${micMode === "de"
+                            ? "bg-red-600 text-white animate-pulse ring-2 ring-red-500/40"
+                            : "bg-amber-400 hover:bg-amber-300 text-slate-950"}`, title: "\u062A\u062D\u062F\u062B \u0628\u0627\u0644\u0623\u0644\u0645\u0627\u0646\u064A\u0629" }, micMode === "de" ? (React.createElement(React.Fragment, null,
+                        React.createElement(MicOff, { className: "w-4 h-4" }),
+                        React.createElement("span", null, "\u0625\u064A\u0642\u0627\u0641"))) : (React.createElement(React.Fragment, null,
+                        React.createElement(Mic, { className: "w-4 h-4" }),
+                        React.createElement("span", null, "\u0627\u062A\u0643\u0644\u0645 \u0623\u0644\u0645\u0627\u0646\u064A")))),
+                    React.createElement("button", { type: "button", onClick: () => startLiveSpeech("ar"), className: `h-10 px-2.5 rounded-xl flex items-center gap-1 font-extrabold text-xs shrink-0 transition-all border cursor-pointer ${micMode === "ar"
+                            ? "bg-emerald-500 text-slate-950 border-emerald-300 animate-pulse"
+                            : "bg-emerald-950/70 hover:bg-emerald-900/70 text-emerald-300 border-emerald-500/40"}`, title: "\u0646\u0633\u064A\u062A \u0643\u0644\u0645\u0629 \u0628\u0627\u0644\u0623\u0644\u0645\u0627\u0646\u064A\u061F \u0627\u0636\u063A\u0637 \u0648\u0642\u0648\u0644\u0647\u0627 \u0628\u0627\u0644\u0639\u0631\u0628\u064A" },
+                        React.createElement(Languages, { className: "w-3.5 h-3.5" }),
+                        React.createElement("span", null, micMode === "ar" ? "عربي 🎙️" : "كلمة عربي 🇪🇬")),
+                    React.createElement("div", { className: "relative flex-1 min-w-[150px]" },
+                        React.createElement("input", { dir: "auto", type: "text", value: inputText, onChange: (e) => {
+                                accumulatedSpeechRef.current = e.target.value;
+                                handleTextChange(e.target.value, {
+                                    immediate: false,
+                                    isSpeakingLive: false
+                                });
+                            }, onKeyDown: (e) => {
+                                if (e.key === "Enter" && inputText.trim()) {
+                                    e.preventDefault();
+                                    runInstantCorrection(inputText.trim(), false, null, true);
+                                }
+                            }, placeholder: micMode !== "off"
+                                ? "اتكلم براحتك... التصحيح يظهر أمامك فوراً 🎙️"
+                                : "اكتب أي جملة ألماني أو عربي واضغط Enter أو صحح الآن...", className: "w-full h-10 bg-slate-950 border border-slate-800 focus:border-amber-400 rounded-xl pl-8 pr-3 text-sm text-white placeholder-slate-500 focus:outline-none transition-colors" }),
+                        React.createElement("div", { className: "absolute left-2.5 top-1/2 -translate-y-1/2 flex items-center" }, isAnalyzing && (React.createElement(Loader2, { className: "w-3.5 h-3.5 text-amber-400 animate-spin" })))),
+                    // زر صحح الآن المباشر بالذكاء الاصطناعي
+                    React.createElement("button", { type: "button", disabled: isAnalyzing || !inputText.trim(), onClick: () => runInstantCorrection(inputText.trim(), false, null, true), className: "h-10 px-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-slate-950 font-black text-xs flex items-center gap-1 shrink-0 transition-all shadow cursor-pointer active:scale-95", title: "\u062A\u0635\u062D\u064A\u062D \u0641\u0648\u0631\u064A \u0628\u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064A" },
+                        React.createElement(Zap, { className: "w-3.5 h-3.5 fill-slate-950" }),
+                        React.createElement("span", null, "\u0635\u062D\u062D \u0627\u0644\u0622\u0646")),
+                    React.createElement("button", { type: "button", onClick: clearCurrentSpeechAndText, disabled: !inputText && !liveTranscript, className: `h-10 px-2.5 rounded-xl font-extrabold text-xs flex items-center gap-1 shrink-0 transition-all cursor-pointer active:scale-95 ${inputText || liveTranscript
+                            ? "bg-rose-600 hover:bg-rose-500 text-white"
+                            : "bg-slate-800 text-slate-500 cursor-not-allowed"}`, title: "\u0645\u0633\u062D \u0627\u0644\u0643\u0644\u0627\u0645 \u0627\u0644\u062D\u0627\u0644\u064A" },
+                        React.createElement(Trash2, { className: "w-3.5 h-3.5" }),
+                        React.createElement("span", null, "\u0645\u0633\u062D")),
+                    React.createElement("button", { type: "button", onClick: archiveCurrentAndStartNewTurn, className: "h-10 px-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs flex items-center gap-1 shrink-0 transition-all cursor-pointer", title: "\u062D\u0641\u0638 \u0627\u0644\u062C\u0645\u0644\u0629 \u0641\u064A \u0627\u0644\u0633\u062C\u0644 \u0648\u0627\u0644\u0628\u062F\u0621 \u0628\u062C\u0645\u0644\u0629 \u062C\u062F\u064A\u062F\u0629" },
+                        React.createElement(MessageSquarePlus, { className: "w-3.5 h-3.5" }),
+                        React.createElement("span", { className: "hidden md:inline" }, "\u062C\u0645\u0644\u0629 \u062C\u062F\u064A\u062F\u0629")),
+                    React.createElement("button", { type: "button", onClick: () => setShowToolsDropdown((prev) => !prev), className: `h-10 px-2.5 rounded-xl text-xs font-bold border flex items-center gap-1 shrink-0 transition-all cursor-pointer ${showToolsDropdown
+                            ? "bg-amber-400/20 border-amber-400 text-amber-300"
+                            : "bg-slate-950 hover:bg-slate-800 border-slate-800 text-slate-400"}`, title: "\u062E\u064A\u0627\u0631\u0627\u062A \u0645\u0647\u0644\u0629 \u0627\u0644\u062A\u0641\u0643\u064A\u0631 \u0648\u062C\u0645\u0644 \u0633\u0631\u064A\u0639\u0629 \u0644\u0644\u062A\u062C\u0631\u0628\u0629" },
+                        React.createElement("span", null, "\u0623\u062F\u0648\u0627\u062A"),
+                        showToolsDropdown ? (React.createElement(ChevronUp, { className: "w-3.5 h-3.5" })) : (React.createElement(ChevronDown, { className: "w-3.5 h-3.5" })))),
+                micMode !== "off" && (React.createElement("div", { className: `rounded-xl px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] border transition-all ${isActivelySpeaking
+                        ? "bg-emerald-950/85 border-emerald-400 text-emerald-200"
+                        : "bg-slate-950/90 border-slate-700 text-slate-300"}` },
+                    React.createElement("div", { className: "flex items-center gap-2 font-bold" },
+                        React.createElement(Radio, { className: `w-3.5 h-3.5 shrink-0 ${isActivelySpeaking ? "text-emerald-400 animate-ping" : "text-amber-400"}` }),
+                        React.createElement("span", null, isActivelySpeaking
+                            ? "🗣️ جاري احتساب وقت كلامك الفعلي والتصحيح التلقائي فوراً..."
+                            : "⏸️ المايك مفتوح (صامت — العداد متوقف حتى تتكلم)")),
+                    liveTranscript && (React.createElement("span", { className: "text-amber-300 font-bold truncate max-w-xs" }, liveTranscript)))),
+                showToolsDropdown && (React.createElement("div", { className: "pt-1.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px] animate-in fade-in duration-150" },
+                    React.createElement("div", { className: "flex items-center gap-1.5 flex-wrap" },
+                        React.createElement("button", { type: "button", onClick: () => setPauseWaitMs((prev) => prev === 450 ? 900 : prev === 900 ? 1500 : 450), className: "font-bold bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 px-2.5 py-1 rounded-lg flex items-center gap-1" },
+                            React.createElement(Clock, { className: "w-3 h-3 text-amber-400" }),
+                            React.createElement("span", null,
+                                "\u0633\u0631\u0639\u0629 \u0627\u0644\u062A\u0635\u062D\u064A\u062D \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A:",
+                                " ",
+                                pauseWaitMs === 450
+                                    ? "طلقة ⚡ (0.45ث)"
+                                    : pauseWaitMs === 900
+                                        ? "متوسطة (0.9ث)"
+                                        : "هادئة (1.5ث)")),
+                        lastArabicMemory?.arabicSpoken && (React.createElement("div", { className: "bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-1 flex items-center gap-1.5" },
+                            React.createElement("span", { className: "text-amber-200 font-bold" },
+                                "\u0622\u062E\u0631 \u0643\u0644\u0645\u0629 \u0639\u0631\u0628\u064A: ",
+                                lastArabicMemory.arabicSpoken),
+                            React.createElement("span", { className: "text-amber-400" }, "\u2B05\uFE0F"),
+                            React.createElement("button", { type: "button", onClick: () => speakGerman(lastArabicMemory.germanEquivalent), className: "font-extrabold text-emerald-300 hover:underline flex items-center gap-1", dir: "ltr" },
+                                playingText === lastArabicMemory.germanEquivalent ? (React.createElement(Square, { className: "w-3 h-3 text-red-400 fill-red-400" })) : (React.createElement(Volume2, { className: "w-3 h-3" })),
+                                React.createElement("span", null, lastArabicMemory.germanEquivalent))))),
+                    React.createElement("div", { className: "flex items-center gap-1 flex-wrap" },
+                        React.createElement("span", { className: "text-slate-500" }, "\u062C\u0645\u0644 \u0644\u0644\u062A\u062C\u0631\u0628\u0629:"),
+                        React.createElement("button", { type: "button", onClick: () => {
+                                accumulatedSpeechRef.current =
+                                    "Ich möchte تذكرة سفر nach Berlin حجز";
+                                handleTextChange("Ich möchte تذكرة سفر nach Berlin حجز", {
+                                    immediate: true
+                                });
+                            }, className: "text-slate-300 hover:text-amber-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800" }, "\u0643\u0644\u0645\u0629 \u0628\u0627\u0644\u0639\u0631\u0628\u064A"),
+                        React.createElement("button", { type: "button", onClick: () => {
+                                accumulatedSpeechRef.current = "Ich bin بردان";
+                                handleTextChange("Ich bin بردان", { immediate: true });
+                            }, className: "text-slate-300 hover:text-amber-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800" }, "\u0623\u0646\u0627 \u0628\u0631\u062F\u0627\u0646"),
+                        React.createElement("button", { type: "button", onClick: () => {
+                                accumulatedSpeechRef.current = "Ich trinke eine Zigarette";
+                                handleTextChange("Ich trinke eine Zigarette", {
+                                    immediate: true
+                                });
+                            }, className: "text-slate-300 hover:text-amber-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800" }, "\u062E\u0637\u0623 \u0645\u0646\u0637\u0642\u064A"))))),
+
+            errorMsg && (React.createElement("div", { className: "bg-amber-500/10 border border-amber-500/30 text-amber-300 px-3 py-1.5 rounded-xl text-xs flex items-center justify-between gap-2" },
+                React.createElement("span", null, errorMsg),
+                !userApiKey && (React.createElement("button", { type: "button", onClick: () => setShowApiPanel(true), className: "bg-amber-400 text-slate-950 font-black px-2.5 py-1 rounded-lg shrink-0" }, "\u0631\u0628\u0637 \u0627\u0644\u0640 API \u0627\u0644\u0622\u0646")))),
+
+            result && (React.createElement("div", { className: "space-y-2" },
+                !result.isCorrect && (React.createElement("div", { className: "bg-red-950/60 border border-red-500/80 rounded-2xl px-3.5 py-2.5 shadow-sm space-y-1.5" },
+                    React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-1.5" },
+                        React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                            React.createElement("span", { className: "inline-flex items-center gap-1 text-[11px] font-extrabold text-red-200 bg-red-500/25 px-2 py-0.5 rounded-full" },
+                                React.createElement(XCircle, { className: "w-3.5 h-3.5" }),
+                                React.createElement("span", null, "\u0645\u0627 \u0642\u0644\u062A\u0647 (\u0627\u0636\u063A\u0637 \u0639\u0644\u0649 \u0627\u0644\u062E\u0637\u0623 \u0644\u0644\u0645\u0639\u0646\u0649 \u0648\u0627\u0644\u0628\u062F\u0627\u0626\u0644):")),
+                            result.replacedWords &&
+                                result.replacedWords.map((item, idx) => (React.createElement("button", { type: "button", key: idx, onClick: () => {
+                                        const details = getInstantWordDetails(item);
+                                        setSelectedWordPopup({
+                                            ...details,
+                                            turnId: "active"
+                                        });
+                                        speakGerman(item.rightGerman);
+                                    }, dir: "auto", className: "text-[11px] bg-slate-950/90 hover:bg-slate-900 border border-red-400/50 hover:border-emerald-400 px-2 py-0.5 rounded-lg text-slate-200 inline-flex items-center gap-1 transition-all cursor-pointer" },
+                                    React.createElement("span", { className: "text-red-300 line-through font-bold" }, item.wrongOrArabic),
+                                    React.createElement("span", { className: "text-slate-400" }, "\u2B05\uFE0F"),
+                                    React.createElement("span", { className: "text-emerald-300 font-extrabold" },
+                                        "\u2713 ",
+                                        item.rightGerman))))),
+                        React.createElement("button", { type: "button", onClick: () => setIsRedBoxCollapsed((prev) => !prev), className: "text-[11px] font-bold bg-red-900/40 hover:bg-red-800/60 text-red-100 border border-red-400/30 px-2 py-0.5 rounded-lg flex items-center gap-1 shrink-0" }, isRedBoxCollapsed ? (React.createElement(React.Fragment, null,
+                            React.createElement(Eye, { className: "w-3 h-3" }),
+                            React.createElement("span", null, "\u0625\u0638\u0647\u0627\u0631"))) : (React.createElement(React.Fragment, null,
+                            React.createElement(EyeOff, { className: "w-3 h-3" }),
+                            React.createElement("span", null, "\u0637\u064A"))))),
+                    !isRedBoxCollapsed && (React.createElement("p", { dir: "auto", className: "text-base sm:text-lg font-bold text-red-200 text-left leading-snug" }, renderHighlightedWrongSentence(result.userSentence, result.replacedWords))))),
+
+                // ==========================================
+                // البطاقة الخضراء الرئيسية للتصحيح الألماني والنطق + قفل الصوت
+                // ==========================================
+                React.createElement("div", { className: "bg-emerald-950/85 border-2 border-emerald-500 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4" },
+                    React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
+                        React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                            React.createElement("span", { className: "inline-flex items-center gap-1 text-xs font-extrabold text-slate-950 bg-emerald-400 px-2.5 py-0.5 rounded-full" },
+                                React.createElement(CheckCircle2, { className: "w-3.5 h-3.5" }),
+                                React.createElement("span", null, "\u0627\u0644\u062A\u0635\u062D\u064A\u062D \u0627\u0644\u0623\u0644\u0645\u0627\u0646\u064A \u0627\u0644\u0645\u0628\u0627\u0634\u0631")),
+                            isAnalyzing ? (React.createElement("span", { className: "inline-flex items-center gap-1 text-xs bg-amber-400 text-slate-950 font-black px-2.5 py-0.5 rounded-full animate-pulse" },
+                                React.createElement(Loader2, { className: "w-3.5 h-3.5 animate-spin" }),
+                                React.createElement("span", null, "\u062C\u0627\u0631\u064A \u0627\u0644\u062A\u0635\u062D\u064A\u062D \u0627\u0644\u0641\u0639\u0644\u064A \u0639\u0628\u0631 Gemini AI..."))) : result.aiVerifiedModel ? (React.createElement("span", { className: "inline-flex items-center gap-1 text-[11px] bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-bold px-2.5 py-0.5 rounded-full" },
+                                React.createElement(Sparkles, { className: "w-3 h-3 text-amber-300" }),
+                                React.createElement("span", null, `\u062A\u0645 \u0627\u0644\u062A\u0635\u062D\u064A\u062D \u0628\u0648\u0627\u0633\u0637\u0629 ${result.aiVerifiedModel} (${(result.aiLatencyMs / 1000).toFixed(2)}\u062B)`))) : null),
+                        React.createElement("div", { className: "flex flex-wrap items-center gap-1.5" },
+                            React.createElement("button", { type: "button", onClick: () => toggleSaveSentenceToVault(result, true), className: `px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 border transition-all cursor-pointer active:scale-95 shadow ${isSentenceSaved(result.correctedGerman)
+                                    ? "bg-amber-400 text-slate-950 border-amber-200"
+                                    : "bg-slate-950/90 hover:bg-amber-400 hover:text-slate-950 text-amber-300 border-amber-400/60"}` },
+                                React.createElement(Bookmark, { className: `w-3.5 h-3.5 ${isSentenceSaved(result.correctedGerman)
+                                        ? "fill-slate-950"
+                                        : ""}` }),
+                                React.createElement("span", null, isSentenceSaved(result.correctedGerman)
+                                    ? "محفوظة بالخزنة ✓"
+                                    : "حفظ للخزنة 🔖")),
+                            // زر تشغيل أو قفل الصوت للجملة الرئيسية
+                            playingText === result.correctedGerman ? (React.createElement("button", { type: "button", onClick: stopSpeaking, className: "px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 bg-red-600 hover:bg-red-500 text-white shadow-lg ring-2 ring-red-400/50 cursor-pointer active:scale-95" },
+                                React.createElement(Square, { className: "w-3.5 h-3.5 fill-white" }),
+                                React.createElement("span", null, "\u23F9\uFE0F \u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))) : (React.createElement("button", { type: "button", onClick: () => speakGerman(result.correctedGerman), className: "px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 transition-all cursor-pointer shadow active:scale-95" },
+                                React.createElement(Volume2, { className: "w-4 h-4" }),
+                                React.createElement("span", null, "\uD83D\uDD0A \u0627\u0633\u0645\u0639 \u0627\u0644\u0646\u0637\u0642"))),
+                            playingText && playingText !== result.correctedGerman && (React.createElement("button", { type: "button", onClick: stopSpeaking, className: "px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 bg-red-600 hover:bg-red-500 text-white shadow cursor-pointer" },
+                                React.createElement(VolumeX, { className: "w-3.5 h-3.5" }),
+                                React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))))),
+                    React.createElement("div", { onClick: () => speakGerman(result.correctedGerman), title: playingText === result.correctedGerman ? "اضغط لقفل الصوت فوراً" : "اضغط لسماع نطق الجملة", className: "py-3 sm:py-5 px-3 bg-slate-950/40 hover:bg-slate-950/60 rounded-2xl border border-emerald-500/25 cursor-pointer transition-all flex items-center justify-between gap-3" },
+                        React.createElement("p", { dir: "ltr", className: "text-2xl sm:text-4xl font-black text-emerald-300 text-left tracking-tight leading-relaxed flex-1" }, renderHighlightedCorrectSentence(result.correctedGerman, result.replacedWords, "active")),
+                        playingText === result.correctedGerman && (React.createElement("button", { type: "button", onClick: (e) => {
+                                e.stopPropagation();
+                                stopSpeaking();
+                            }, className: "bg-red-600 hover:bg-red-500 text-white font-black text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 shrink-0 shadow-lg" },
+                            React.createElement(Square, { className: "w-3.5 h-3.5 fill-white" }),
+                            React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A")))),
+                    selectedWordPopup && (React.createElement("div", { className: "bg-slate-950/95 border-2 border-amber-400 rounded-2xl p-3.5 shadow-2xl space-y-2.5 animate-in fade-in duration-100" },
+                        React.createElement("div", { className: "flex items-start justify-between gap-2" },
+                            React.createElement("div", { className: "flex flex-wrap items-center gap-2" },
+                                React.createElement("span", { className: "text-xs font-extrabold bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full" }, "\u0627\u0644\u0645\u0639\u0646\u0649 \u0648\u0627\u0644\u0628\u062F\u0627\u0626\u0644 \u26A1"),
+                                React.createElement("span", { dir: "ltr", className: "text-lg font-black text-emerald-300" }, selectedWordPopup.rightGerman),
+                                playingText === selectedWordPopup.rightGerman ? (React.createElement("button", { type: "button", onClick: stopSpeaking, className: "bg-red-600 hover:bg-red-500 text-white px-2.5 py-0.5 rounded-lg text-xs font-black inline-flex items-center gap-1" },
+                                    React.createElement(Square, { className: "w-3 h-3 fill-white" }),
+                                    React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))) : (React.createElement("button", { type: "button", onClick: () => speakGerman(selectedWordPopup.rightGerman), className: "bg-emerald-500/20 hover:bg-emerald-500/35 text-emerald-200 px-2 py-0.5 rounded-lg text-xs font-bold inline-flex items-center gap-1" },
+                                    React.createElement(Volume2, { className: "w-3.5 h-3.5" }),
+                                    React.createElement("span", null, "\u0646\u0637\u0642"))),
+                                React.createElement("span", { className: "text-sm font-extrabold text-white bg-emerald-950 border border-emerald-500/40 px-2.5 py-0.5 rounded-xl" }, selectedWordPopup.arabicMeaning)),
+                            React.createElement("button", { type: "button", onClick: () => setSelectedWordPopup(null), className: "text-slate-400 hover:text-white bg-slate-900 p-1 rounded-lg border border-slate-800" },
+                                React.createElement(X, { className: "w-4 h-4" }))),
+                        React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-1.5 border-t border-slate-800" }, (selectedWordPopup.alternatives || []).map((alt, idx) => (React.createElement("button", { type: "button", key: idx, onClick: () => applyAlternativeWord(selectedWordPopup.turnId, selectedWordPopup.rightGerman, alt.de), className: "bg-slate-900 hover:bg-emerald-950/80 border border-slate-700 hover:border-emerald-400 rounded-xl px-2.5 py-2 text-right flex items-center justify-between gap-2 transition-all group cursor-pointer" },
+                            React.createElement("span", { className: "text-xs text-slate-300 font-semibold truncate" }, alt.ar),
+                            React.createElement("span", { dir: "ltr", className: "text-xs sm:text-sm font-extrabold text-emerald-300 group-hover:text-amber-300 shrink-0 flex items-center gap-1" },
+                                React.createElement(Volume2, { className: "w-3 h-3 text-emerald-400" }),
+                                alt.de))))))),
+                    React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-emerald-500/30" },
+                        React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                            React.createElement("span", { className: "text-xs font-bold text-emerald-400" }, "\u0627\u0644\u062A\u0631\u062C\u0645\u0629 \u0627\u0644\u0641\u0648\u0631\u064A\u0629:"),
+                            React.createElement("span", { className: "text-base sm:text-lg font-extrabold text-white" }, result.arabicMeaning)),
+                        React.createElement("span", { className: "text-[11px] text-emerald-300/80" }, "\uD83D\uDCA1 \u0627\u0636\u063A\u0637 \u0639\u0644\u0649 \u0627\u0644\u062C\u0645\u0644\u0629 \u0644\u0644\u0646\u0637\u0642 \u0648\u0627\u0636\u063A\u0637 \u0645\u0631\u0629 \u062B\u0627\u0646\u064A\u0629 (\u0623\u0648 \u0632\u0631 \u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A) \u0644\u0644\u0625\u064A\u0642\u0627\u0641"))),
+
+                React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-2" },
+                    React.createElement("button", { type: "button", onClick: () => setShowExamplesDropdown((prev) => !prev), className: `w-full px-3.5 py-2.5 rounded-2xl border text-xs font-extrabold flex items-center justify-between transition-all cursor-pointer ${showExamplesDropdown
+                            ? "bg-amber-400 text-slate-950 border-amber-300 shadow-md"
+                            : "bg-slate-900 hover:bg-slate-800/90 text-amber-300 border-slate-800"}` },
+                        React.createElement("div", { className: "flex items-center gap-1.5 truncate" },
+                            React.createElement(Sparkles, { className: "w-4 h-4 shrink-0" }),
+                            React.createElement("span", { className: "truncate" },
+                                "\u0627\u0644\u0633\u064A\u0627\u0642 \u0648\u0627\u0644\u0623\u0645\u062B\u0644\u0629 \u0627\u0644\u0634\u0628\u064A\u0647\u0629 (",
+                                result.similarExamples?.length || 0,
+                                ")")),
+                        showExamplesDropdown ? (React.createElement(ChevronUp, { className: "w-4 h-4 shrink-0" })) : (React.createElement(ChevronDown, { className: "w-4 h-4 shrink-0" }))),
+                    React.createElement("button", { type: "button", onClick: () => setShowHistoryDropdown((prev) => !prev), className: `w-full px-3.5 py-2.5 rounded-2xl border text-xs font-extrabold flex items-center justify-between transition-all cursor-pointer ${showHistoryDropdown
+                            ? "bg-emerald-400 text-slate-950 border-emerald-300 shadow-md"
+                            : "bg-slate-900 hover:bg-slate-800/90 text-emerald-300 border-slate-800"}` },
+                        React.createElement("div", { className: "flex items-center gap-1.5 truncate" },
+                            React.createElement(Layers, { className: "w-4 h-4 shrink-0" }),
+                            React.createElement("span", { className: "truncate" },
+                                "\u0633\u062C\u0644 \u0627\u0644\u062C\u0645\u0644 \u0627\u0644\u0633\u0627\u0628\u0642\u0629 \u0641\u064A \u0627\u0644\u0645\u062D\u0627\u062F\u062B\u0629 (",
+                                conversationTurns.length,
+                                ")")),
+                        showHistoryDropdown ? (React.createElement(ChevronUp, { className: "w-4 h-4 shrink-0" })) : (React.createElement(ChevronDown, { className: "w-4 h-4 shrink-0" })))),
+
+                showExamplesDropdown && (React.createElement("div", { className: "bg-slate-900 border border-amber-400/40 rounded-2xl p-3.5 space-y-2.5 animate-in fade-in duration-150" },
+                    React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                        React.createElement("div", { className: "flex items-start gap-2 text-xs" },
+                            React.createElement("span", { className: "font-extrabold shrink-0 bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-md" }, "\u0627\u0644\u0633\u064A\u0627\u0642 \u0648\u0627\u0644\u0645\u0646\u0637\u0642:"),
+                            React.createElement("p", { className: "text-slate-200 leading-relaxed" }, result.contextAndLogic)),
+                        playingText && (React.createElement("button", { type: "button", onClick: stopSpeaking, className: "bg-red-600 hover:bg-red-500 text-white text-[11px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1 shrink-0" },
+                            React.createElement(Square, { className: "w-3 h-3 fill-white" }),
+                            React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A")))),
+                    result.similarExamples && result.similarExamples.length > 0 && (React.createElement("div", { className: "grid grid-cols-1 gap-1.5 pt-2 border-t border-slate-800" }, result.similarExamples.map((ex, i) => {
+                        const isExPlaying = playingText === ex.de;
+                        return (React.createElement("div", { key: i, onClick: () => speakGerman(ex.de), className: `cursor-pointer border rounded-xl px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 transition-all group ${isExPlaying
+                                ? "bg-emerald-950/80 border-red-400"
+                                : "bg-slate-950/90 hover:bg-slate-950 border-slate-800 hover:border-emerald-500/40"}` },
+                            React.createElement("div", { className: "flex items-center gap-2 min-w-0" },
+                                isExPlaying ? (React.createElement("button", { type: "button", onClick: (e) => {
+                                        e.stopPropagation();
+                                        stopSpeaking();
+                                    }, className: "bg-red-600 hover:bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0" },
+                                    React.createElement(Square, { className: "w-2.5 h-2.5 fill-white" }),
+                                    React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))) : (React.createElement(Volume2, { className: "w-3.5 h-3.5 text-emerald-400 shrink-0" })),
+                                ex.tag && (React.createElement("span", { className: "text-[10px] font-bold bg-slate-800 text-amber-300 px-2 py-0.5 rounded-md shrink-0" }, ex.tag)),
+                                React.createElement("span", { className: "text-xs text-slate-300 truncate" }, ex.ar)),
+                            React.createElement("span", { dir: "ltr", className: "text-xs sm:text-sm font-bold text-emerald-300 text-left shrink-0" }, ex.de)));
+                    }))))),
+
+                showHistoryDropdown && (React.createElement("div", { className: "bg-slate-900 border border-emerald-500/40 rounded-2xl p-3.5 space-y-2.5 animate-in fade-in duration-150" },
+                    React.createElement("div", { className: "flex items-center justify-between pb-2 border-b border-slate-800" },
+                        React.createElement("span", { className: "text-xs font-extrabold text-emerald-300" },
+                            "\u0627\u0644\u062C\u0645\u0644 \u0627\u0644\u0633\u0627\u0628\u0642\u0629 \u0641\u064A \u0647\u0630\u0647 \u0627\u0644\u062C\u0644\u0633\u0629 (",
+                            conversationTurns.length,
+                            ")"),
+                        React.createElement("div", { className: "flex items-center gap-2" },
+                            playingText && (React.createElement("button", { type: "button", onClick: stopSpeaking, className: "px-2.5 py-1 rounded-lg text-[11px] font-black bg-red-600 text-white flex items-center gap-1" },
+                                React.createElement(Square, { className: "w-3 h-3 fill-white" }),
+                                React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))),
+                            conversationTurns.length > 0 && (React.createElement(React.Fragment, null,
+                                React.createElement("button", { type: "button", onClick: () => {
+                                        const allGerman = conversationTurns
+                                            .map((t) => t.correctedGerman)
+                                            .filter(Boolean)
+                                            .join(" ");
+                                        speakGerman(allGerman);
+                                    }, className: "px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-emerald-400 text-slate-950 flex items-center gap-1" },
+                                    React.createElement(Volume2, { className: "w-3 h-3" }),
+                                    React.createElement("span", null, "\u0646\u0637\u0642 \u0627\u0644\u0633\u062C\u0644")),
+                                React.createElement("button", { type: "button", onClick: () => setConversationTurns([]), className: "px-2 py-1 rounded-lg text-[11px] font-bold bg-slate-950 text-slate-400 hover:text-red-300 border border-slate-800 flex items-center gap-1" },
+                                    React.createElement(Trash2, { className: "w-3 h-3" }),
+                                    React.createElement("span", null, "\u0645\u0633\u062D")))))),
+                    conversationTurns.length === 0 ? (React.createElement("p", { className: "text-xs text-slate-400 text-center py-3" }, "\u0644\u0627 \u062A\u0648\u062C\u062F \u062C\u0645\u0644 \u0633\u0627\u0628\u0642\u0629 \u0641\u064A \u0647\u0630\u0647 \u0627\u0644\u062C\u0644\u0633\u0629 \u0628\u0639\u062F.")) : (React.createElement("div", { className: "space-y-2 max-h-72 overflow-y-auto pr-1" }, conversationTurns.map((turn, idx) => {
+                        const turnSaved = isSentenceSaved(turn.correctedGerman);
+                        const isTurnPlaying = playingText === turn.correctedGerman;
+                        return (React.createElement("div", { key: turn.id || idx, className: "bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1.5" },
+                            React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                                React.createElement("span", { className: "text-[11px] font-bold text-emerald-400" },
+                                    "\u062C\u0645\u0644\u0629 #",
+                                    idx + 1,
+                                    ": ",
+                                    turn.arabicMeaning),
+                                React.createElement("div", { className: "flex items-center gap-1.5" },
+                                    React.createElement("button", { type: "button", onClick: () => toggleSaveSentenceToVault(turn, true), className: `px-2 py-0.5 rounded-lg text-[11px] font-bold flex items-center gap-1 border ${turnSaved
+                                            ? "bg-amber-400 text-slate-950 border-amber-300"
+                                            : "bg-slate-900 text-amber-300 border-amber-400/40"}` },
+                                        React.createElement(Bookmark, { className: "w-3 h-3" }),
+                                        React.createElement("span", null, turnSaved ? "محفوظة" : "حفظ")),
+                                    isTurnPlaying ? (React.createElement("button", { type: "button", onClick: stopSpeaking, className: "px-2.5 py-0.5 rounded-lg text-[11px] font-black bg-red-600 text-white flex items-center gap-1" },
+                                        React.createElement(Square, { className: "w-3 h-3 fill-white" }),
+                                        React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))) : (React.createElement("button", { type: "button", onClick: () => speakGerman(turn.correctedGerman), className: "px-2 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-500/20 text-emerald-200 flex items-center gap-1" },
+                                        React.createElement(Volume2, { className: "w-3 h-3" }),
+                                        React.createElement("span", null, "\u0646\u0637\u0642"))))),
+                            React.createElement("p", { dir: "ltr", onClick: () => speakGerman(turn.correctedGerman), className: "text-base sm:text-lg font-extrabold text-emerald-200 text-left cursor-pointer" }, renderHighlightedCorrectSentence(turn.correctedGerman, turn.replacedWords, turn.id))));
+                    }))))))),
+
+            // ==========================================
+            // نافذة الخزنة والحافظة الدائمة (مع أزرار قفل الصوت لكل جملة ولكل بديل)
+            // ==========================================
+            showVaultModal && (React.createElement("div", { className: "fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4" },
+                React.createElement("div", { className: "bg-slate-900 border-2 border-amber-400 rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in duration-150" },
+                    React.createElement("div", { className: "px-4 py-3 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2" },
+                        React.createElement("div", { className: "flex items-center gap-2" },
+                            React.createElement("div", { className: "p-2 rounded-xl bg-amber-400 text-slate-950" },
+                                React.createElement(BookOpen, { className: "w-4 h-4" })),
+                            React.createElement("div", null,
+                                React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                                    React.createElement("h2", { className: "text-sm sm:text-base font-black text-white" },
+                                        "\u0627\u0644\u062E\u0632\u0646\u0629 \u0648\u0627\u0644\u062D\u0627\u0641\u0638\u0629 \u0627\u0644\u062F\u0627\u0626\u0645\u0629 (",
+                                        savedVault.length,
+                                        ")"),
+                                    React.createElement("span", { className: "text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-bold" },
+                                        React.createElement(Cloud, { className: "w-3 h-3" }),
+                                        React.createElement("span", null, "\u062D\u0641\u0638 \u062F\u0627\u0626\u0645"))),
+                                React.createElement("p", { className: "text-[11px] text-slate-400" }, "\u0627\u0636\u063A\u0637 \u0639\u0644\u0649 \u0623\u064A \u062C\u0645\u0644\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u0644\u062A\u0641\u062A\u062D \u0644\u0643 \u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0645\u0646\u0633\u062F\u0644\u0629 \u0644\u0644\u0628\u062F\u0627\u064A\u0644 \u0627\u0644\u0645\u062A\u0634\u0627\u0628\u0647\u0629 \u0628\u0627\u0644\u0635\u0648\u062A"))),
+                        React.createElement("div", { className: "flex items-center gap-1.5 flex-wrap" },
+                            playingText && (React.createElement("button", { type: "button", onClick: stopSpeaking, className: "bg-red-600 hover:bg-red-500 text-white font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1 shadow-lg animate-pulse cursor-pointer" },
+                                React.createElement(Square, { className: "w-3.5 h-3.5 fill-white" }),
+                                React.createElement("span", null, "\u23F9\uFE0F \u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))),
+                            React.createElement("button", { type: "button", onClick: () => setShowPasteBoxDropdown((prev) => !prev), className: `px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 transition-all cursor-pointer ${showPasteBoxDropdown
+                                    ? "bg-amber-400 text-slate-950"
+                                    : "bg-amber-400/20 hover:bg-amber-400/30 text-amber-300 border border-amber-400/40"}` },
+                                React.createElement(ClipboardPaste, { className: "w-3.5 h-3.5" }),
+                                React.createElement("span", null, "+ \u0644\u0635\u0642 \u0643\u0644\u0627\u0645 \u0644\u0644\u062E\u0632\u0646\u0629"),
+                                showPasteBoxDropdown ? (React.createElement(ChevronUp, { className: "w-3.5 h-3.5" })) : (React.createElement(ChevronDown, { className: "w-3.5 h-3.5" }))),
+                            savedVault.length > 0 && (React.createElement("button", { type: "button", onClick: () => {
+                                    const allVaultGerman = filteredVaultItems
+                                        .map((item) => item.correctedGerman)
+                                        .join(" ... ");
+                                    speakGerman(allVaultGerman);
+                                }, className: "bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1 shadow cursor-pointer" },
+                                React.createElement(Volume2, { className: "w-3.5 h-3.5" }),
+                                React.createElement("span", { className: "hidden sm:inline" }, "\u0646\u0637\u0642 \u0627\u0644\u0643\u0644"))),
+                            React.createElement("button", { type: "button", onClick: () => {
+                                    setBackupJsonText(JSON.stringify(savedVault, null, 2));
+                                    setShowBackupArea((prev) => !prev);
+                                }, className: "bg-slate-800 hover:bg-slate-700 text-slate-200 p-1.5 rounded-xl text-xs border border-slate-700", title: "\u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629" },
+                                React.createElement(Download, { className: "w-4 h-4 text-amber-400" })),
+                            React.createElement("button", { type: "button", onClick: () => setShowVaultModal(false), className: "bg-slate-800 hover:bg-slate-700 text-slate-200 p-1.5 rounded-xl" },
+                                React.createElement(X, { className: "w-5 h-5" })))),
+                    showBackupArea && (React.createElement("div", { className: "p-3 bg-slate-950 border-b border-slate-800 space-y-2" },
+                        React.createElement("div", { className: "flex items-center justify-between" },
+                            React.createElement("span", { className: "text-xs font-extrabold text-amber-300" }, "\u0646\u0633\u062E \u0627\u062D\u062A\u064A\u0627\u0637\u064A \u0648\u0627\u0633\u062A\u0631\u062C\u0627\u0639 \u0627\u0644\u062E\u0632\u0646\u0629:"),
+                            React.createElement("div", { className: "flex items-center gap-1.5" },
+                                React.createElement("button", { type: "button", onClick: () => {
+                                        copyTextToClipboard(backupJsonText);
+                                        triggerVaultToast("تم نسخ كود الخزنة الاحتياطي!");
+                                    }, className: "bg-amber-400 text-slate-950 px-2.5 py-1 rounded-lg text-xs font-black" }, "\u0646\u0633\u062E \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A"),
+                                React.createElement("button", { type: "button", onClick: async () => {
+                                        try {
+                                            const parsed = JSON.parse(backupJsonText);
+                                            if (Array.isArray(parsed)) {
+                                                for (const item of parsed) {
+                                                    if (item && item.correctedGerman) {
+                                                        await persistVaultItem({
+                                                            ...item,
+                                                            id: item.id || `vault-${Date.now()}-${Math.random()}`
+                                                        });
+                                                    }
+                                                }
+                                                triggerVaultToast("تم استيراد الخزنة بنجاح! ✓");
+                                                setShowBackupArea(false);
+                                            }
+                                        }
+                                        catch (_) {
+                                            triggerVaultToast("تأكد من صحة النص المنسوخ");
+                                        }
+                                    }, className: "bg-emerald-400 text-slate-950 px-2.5 py-1 rounded-lg text-xs font-black" }, "\u0627\u0633\u062A\u0631\u062C\u0627\u0639 \u0648\u062D\u0641\u0638"))),
+                        React.createElement("textarea", { dir: "ltr", rows: 2, value: backupJsonText, onChange: (e) => setBackupJsonText(e.target.value), className: "w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-[11px] font-mono text-slate-300" }))),
+                    showPasteBoxDropdown && (React.createElement("div", { className: "p-3 bg-slate-950/90 border-b border-amber-400/30 space-y-2 animate-in fade-in duration-150" },
+                        React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
+                            React.createElement("span", { className: "text-xs font-extrabold text-amber-300" }, "\u0627\u0644\u0635\u0642 \u0623\u064A \u062C\u0645\u0644 \u0623\u0648 \u0643\u0644\u0645\u0627\u062A \u0647\u0646\u0627 \u0644\u064A\u062A\u0645 \u062A\u0631\u062A\u064A\u0628\u0647\u0627 \u0648\u062A\u0635\u062D\u064A\u062D\u0647\u0627 \u0648\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0635\u0648\u062A \u0648\u0627\u0644\u0628\u062F\u0627\u064A\u0644:"),
+                            React.createElement("button", { type: "button", onClick: async () => {
+                                    try {
+                                        if (navigator.clipboard?.readText) {
+                                            const clip = await navigator.clipboard.readText();
+                                            if (clip && clip.trim()) {
+                                                setPasteBoxText(clip);
+                                                organizeAndSavePastedText(clip);
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    catch (_) { }
+                                    triggerVaultToast("الصق النص في الخانة ثم اضغط رتّب واحفظ!");
+                                }, className: "bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-400/40 px-2.5 py-1 rounded-lg text-[11px] font-bold" }, "\u0644\u0635\u0642 \u0633\u0631\u064A\u0639 \u0645\u0646 \u0627\u0644\u062D\u0627\u0641\u0638\u0629 \uD83D\uDCCB")),
+                        React.createElement("div", { className: "flex flex-col sm:flex-row gap-2" },
+                            React.createElement("textarea", { dir: "auto", rows: 2, value: pasteBoxText, onChange: (e) => setPasteBoxText(e.target.value), placeholder: "\u0627\u0644\u0635\u0642 \u0647\u0646\u0627 \u0645\u0627 \u0646\u0633\u062E\u062A\u0647...", className: "flex-1 bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-xl px-3 py-2 text-xs text-white" }),
+                            React.createElement("button", { type: "button", disabled: isOrganizingPaste || !pasteBoxText.trim(), onClick: () => organizeAndSavePastedText(pasteBoxText), className: "px-4 py-2 rounded-xl font-black text-xs bg-amber-400 hover:bg-amber-300 text-slate-950 shrink-0" }, isOrganizingPaste ? "جاري الترتيب..." : "رتّب واحفظ ✨")))),
+                    React.createElement("div", { className: "px-4 py-2 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2" },
+                        React.createElement("div", { className: "flex items-center gap-1" },
+                            React.createElement("button", { type: "button", onClick: () => setVaultFilter("all"), className: `px-2.5 py-1 rounded-lg text-xs font-extrabold ${vaultFilter === "all"
+                                    ? "bg-amber-400 text-slate-950"
+                                    : "bg-slate-950 text-slate-300"}` },
+                                "\u0627\u0644\u0643\u0644 (",
+                                savedVault.length,
+                                ")"),
+                            React.createElement("button", { type: "button", onClick: () => setVaultFilter("unreviewed"), className: `px-2.5 py-1 rounded-lg text-xs font-extrabold ${vaultFilter === "unreviewed"
+                                    ? "bg-amber-400 text-slate-950"
+                                    : "bg-slate-950 text-slate-300"}` },
+                                "\u0644\u0644\u0645\u0631\u0627\u062C\u0639\u0629 (",
+                                savedVault.filter((i) => !i.reviewed).length,
+                                ")"),
+                            React.createElement("button", { type: "button", onClick: () => setVaultFilter("reviewed"), className: `px-2.5 py-1 rounded-lg text-xs font-extrabold ${vaultFilter === "reviewed"
+                                    ? "bg-emerald-400 text-slate-950"
+                                    : "bg-slate-950 text-slate-300"}` },
+                                "\u062A\u0645\u062A \u2705 (",
+                                savedVault.filter((i) => i.reviewed).length,
+                                ")")),
+                        React.createElement("div", { className: "relative flex-1 max-w-xs min-w-[140px]" },
+                            React.createElement(Search, { className: "w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2" }),
+                            React.createElement("input", { type: "text", value: vaultSearchQuery, onChange: (e) => setVaultSearchQuery(e.target.value), placeholder: "\u0627\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u062E\u0632\u0646\u0629...", className: "w-full bg-slate-950 border border-slate-800 rounded-lg pr-8 pl-2.5 py-1 text-xs text-white focus:outline-none focus:border-amber-400" }))),
+                    React.createElement("div", { className: "p-3 sm:p-4 overflow-y-auto space-y-2 flex-1" }, filteredVaultItems.length === 0 ? (React.createElement("div", { className: "text-center py-10 space-y-2" },
+                        React.createElement(Bookmark, { className: "w-10 h-10 text-slate-600 mx-auto" }),
+                        React.createElement("p", { className: "text-sm font-bold text-slate-300" }, "\u0644\u0627 \u062A\u0648\u062C\u062F \u062C\u0645\u0644 \u0645\u0637\u0627\u0628\u0642\u0629 \u062D\u0627\u0644\u064A\u0627\u064B"))) : (filteredVaultItems.map((item, idx) => {
+                        const isExpanded = !!expandedVaultIds[item.id];
+                        const examplesList = item.similarExamples || [];
+                        const wordsList = item.replacedWords || [];
+                        const isVaultItemPlaying = playingText === item.correctedGerman;
+                        return (React.createElement("div", { key: item.id || idx, className: `rounded-2xl border transition-all overflow-hidden ${item.reviewed
+                                ? "bg-emerald-950/20 border-emerald-500/40"
+                                : "bg-slate-950/95 border-slate-800 hover:border-amber-400/60"}` },
+                            React.createElement("div", { onClick: () => toggleVaultDropdown(item.id), className: "px-3.5 py-2.5 cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-2 select-none" },
+                                React.createElement("div", { className: "space-y-1 min-w-0 flex-1" },
+                                    React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                                        React.createElement("span", { className: "text-[11px] font-black bg-amber-400 text-slate-950 px-2 py-0.2 rounded-md" },
+                                            "#",
+                                            idx + 1),
+                                        React.createElement("p", { dir: "ltr", onClick: (e) => {
+                                                e.stopPropagation();
+                                                speakGerman(item.correctedGerman);
+                                            }, title: isVaultItemPlaying ? "اضغط لقفل الصوت" : "اضغط لسماع النطق", className: "text-base sm:text-xl font-black text-emerald-300 hover:underline text-left cursor-pointer" }, item.correctedGerman)),
+                                    React.createElement("div", { className: "flex items-center gap-2 flex-wrap text-xs" },
+                                        React.createElement("span", { className: "font-bold text-slate-200" }, item.arabicMeaning),
+                                        wordsList.length > 0 && (React.createElement("span", { className: "text-[11px] text-emerald-400/90" },
+                                            "(",
+                                            wordsList.map((w) => `✓ ${w.rightGerman}`).join(" • "),
+                                            ")")))),
+                                React.createElement("div", { className: "flex items-center gap-1.5 shrink-0", onClick: (e) => e.stopPropagation() },
+                                    isVaultItemPlaying ? (React.createElement("button", { type: "button", onClick: stopSpeaking, className: "px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 shadow bg-red-600 hover:bg-red-500 text-white cursor-pointer" },
+                                        React.createElement(Square, { className: "w-3.5 h-3.5 fill-white" }),
+                                        React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))) : (React.createElement("button", { type: "button", onClick: () => speakGerman(item.correctedGerman), className: "px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 shadow bg-emerald-400 hover:bg-emerald-300 text-slate-950 cursor-pointer" },
+                                        React.createElement(Volume2, { className: "w-3.5 h-3.5" }),
+                                        React.createElement("span", null, "\u0646\u0637\u0642"))),
+                                    React.createElement("button", { type: "button", onClick: () => toggleVaultDropdown(item.id), className: `px-2.5 py-1.5 rounded-xl text-xs font-extrabold border flex items-center gap-1 cursor-pointer ${isExpanded
+                                            ? "bg-amber-400 text-slate-950 border-amber-300"
+                                            : "bg-amber-500/15 text-amber-300 border-amber-400/40"}` },
+                                        React.createElement("span", null,
+                                            "\u0628\u062F\u0627\u064A\u0644 (",
+                                            examplesList.length,
+                                            ")"),
+                                        isExpanded ? (React.createElement(ChevronUp, { className: "w-3.5 h-3.5" })) : (React.createElement(ChevronDown, { className: "w-3.5 h-3.5" }))),
+                                    React.createElement("button", { type: "button", onClick: () => toggleVaultItemReviewed(item.id), className: `p-1.5 rounded-xl border ${item.reviewed
+                                            ? "bg-emerald-500/25 border-emerald-400 text-emerald-300"
+                                            : "bg-slate-900 border-slate-700 text-slate-400"}`, title: "\u062A\u0645\u062A \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629" },
+                                        React.createElement(Check, { className: "w-3.5 h-3.5" })),
+                                    React.createElement("button", { type: "button", onClick: () => deleteVaultItem(item.id), className: "p-1.5 rounded-xl bg-slate-900 hover:bg-red-950 text-slate-400 hover:text-red-300 border border-slate-800", title: "\u062D\u0630\u0641" },
+                                        React.createElement(Trash2, { className: "w-3.5 h-3.5" })))),
+                            isExpanded && (React.createElement("div", { className: "bg-slate-900/95 border-t border-amber-400/40 p-3 space-y-2.5 animate-in fade-in duration-150" },
+                                React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2" },
+                                    React.createElement("span", { className: "text-xs font-black text-amber-300" }, "\u0627\u0644\u0628\u062F\u0627\u064A\u0644 \u0627\u0644\u0645\u062A\u0634\u0627\u0628\u0647\u0629 \u0641\u064A \u0646\u0641\u0633 \u0627\u0644\u0633\u064A\u0627\u0642 (\u0627\u0636\u063A\u0637 \u0644\u0644\u0646\u0637\u0642 \u0623\u0648 \u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A):"),
+                                    React.createElement("div", { className: "flex items-center gap-1.5" },
+                                        playingText && (React.createElement("button", { type: "button", onClick: stopSpeaking, className: "text-[11px] font-black bg-red-600 text-white px-2.5 py-0.5 rounded-lg flex items-center gap-1" },
+                                            React.createElement(Square, { className: "w-3 h-3 fill-white" }),
+                                            React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))),
+                                        React.createElement("button", { type: "button", disabled: loadingMoreVaultId === item.id, onClick: () => generateMoreAlternativesForVaultItem(item), className: "text-[11px] font-extrabold bg-amber-400/15 hover:bg-amber-400/30 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-lg flex items-center gap-1" }, loadingMoreVaultId === item.id
+                                            ? "جاري التوليد..."
+                                            : "+ بدايل أكثر ✨"))),
+                                React.createElement("div", { className: "grid grid-cols-1 gap-1.5" }, examplesList.map((ex, exIdx) => {
+                                    const isAltPlaying = playingText === ex.de;
+                                    return (React.createElement("div", { key: exIdx, onClick: () => speakGerman(ex.de), className: `border rounded-xl px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 cursor-pointer transition-all ${isAltPlaying
+                                            ? "bg-emerald-950/90 border-red-400"
+                                            : "bg-slate-950 hover:bg-slate-900 border-slate-800 hover:border-emerald-400/50"}` },
+                                        React.createElement("div", { className: "flex items-center gap-2" },
+                                            isAltPlaying ? (React.createElement("button", { type: "button", onClick: (e) => {
+                                                    e.stopPropagation();
+                                                    stopSpeaking();
+                                                }, className: "bg-red-600 hover:bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0" },
+                                                React.createElement(Square, { className: "w-2.5 h-2.5 fill-white" }),
+                                                React.createElement("span", null, "\u0642\u0641\u0644 \u0627\u0644\u0635\u0648\u062A"))) : (React.createElement(Volume2, { className: "w-3.5 h-3.5 text-emerald-400 shrink-0" })),
+                                            ex.tag && (React.createElement("span", { className: "text-[10px] font-bold bg-slate-800 text-amber-300 px-1.5 py-0.5 rounded" }, ex.tag)),
+                                            React.createElement("span", { className: "text-xs text-slate-200" }, ex.ar)),
+                                        React.createElement("span", { dir: "ltr", className: "text-sm font-black text-emerald-300 text-left" }, ex.de)));
+                                }))))));
+                    })))))),
+
+            showSpeakingTimerModal && (React.createElement("div", { className: "fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" },
+                React.createElement("div", { className: "bg-slate-900 border-2 border-emerald-500 rounded-3xl w-full max-w-xl p-5 shadow-2xl space-y-4 animate-in fade-in duration-150" },
+                    React.createElement("div", { className: "flex items-center justify-between border-b border-slate-800 pb-3" },
+                        React.createElement("div", { className: "flex items-center gap-2" },
+                            React.createElement("div", { className: "p-2 rounded-xl bg-emerald-400 text-slate-950" },
+                                React.createElement(Award, { className: "w-5 h-5" })),
+                            React.createElement("h2", { className: "text-base font-black text-white" }, "\u062A\u0648\u062A\u0627\u0644 \u0648\u0642\u062A \u0643\u0644\u0627\u0645\u0643 \u0648\u0627\u0644\u0647\u062F\u0641 \u0627\u0644\u064A\u0648\u0645\u064A \u23F1\uFE0F")),
+                        React.createElement("button", { type: "button", onClick: () => setShowSpeakingTimerModal(false), className: "bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-xl" },
+                            React.createElement(X, { className: "w-5 h-5" }))),
+                    React.createElement("div", { className: "bg-slate-950 border border-emerald-500/40 rounded-2xl p-4 text-center space-y-2" },
+                        React.createElement("div", { dir: "ltr", className: "text-4xl font-black text-amber-300 tracking-wider font-mono" }, formatDuration(totalSpokenSeconds)),
+                        React.createElement("div", { className: "text-xs text-slate-300 font-bold" },
+                            "\u0627\u0644\u0647\u062F\u0641 \u0627\u0644\u064A\u0648\u0645\u064A: ",
+                            dailyGoalMinutes,
+                            " \u062F\u0642\u064A\u0642\u0629 \u2022 \u0627\u0644\u0625\u0646\u062C\u0627\u0632: ",
+                            progressPercent,
+                            "%"),
+                        React.createElement("div", { className: "w-full h-2.5 bg-slate-800 rounded-full overflow-hidden" },
+                            React.createElement("div", { className: "h-full bg-emerald-400 transition-all duration-300", style: { width: `${progressPercent}%` } }))),
+                    React.createElement("div", { className: "space-y-2" },
+                        React.createElement("label", { className: "text-xs font-extrabold text-slate-300 block" }, "\u0627\u062E\u062A\u0631 \u0647\u062F\u0641\u0643 \u0627\u0644\u064A\u0648\u0645\u064A (\u0628\u0627\u0644\u062F\u0642\u0627\u0626\u0642):"),
+                        React.createElement("div", { className: "grid grid-cols-3 sm:grid-cols-6 gap-1.5" }, [5, 10, 15, 20, 30, 45].map((mins) => (React.createElement("button", { type: "button", key: mins, onClick: () => updateDailyGoalMinutes(mins), className: `py-1.5 rounded-xl text-xs font-black border ${dailyGoalMinutes === mins
+                                ? "bg-amber-400 text-slate-950 border-amber-300"
+                                : "bg-slate-950 text-slate-200 border-slate-800"}` },
+                            mins,
+                            "\u062F")))),
+                        React.createElement("div", { className: "flex items-center gap-2 pt-1" },
+                            React.createElement("input", { type: "number", min: "1", max: "300", value: customGoalInput, onChange: (e) => setCustomGoalInput(e.target.value), placeholder: "\u0623\u0648 \u0627\u0643\u062A\u0628 \u062F\u0642\u0627\u0626\u0642 \u0645\u062E\u0635\u0635\u0629...", className: "flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white" }),
+                            React.createElement("button", { type: "button", onClick: () => {
+                                    const val = parseInt(customGoalInput, 10);
+                                    if (val > 0) {
+                                        updateDailyGoalMinutes(val);
+                                        setCustomGoalInput("");
+                                    }
+                                }, className: "bg-emerald-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs" }, "\u062D\u0641\u0638"))),
+                    React.createElement("div", { className: "flex items-center justify-between pt-2 border-t border-slate-800" },
+                        React.createElement("button", { type: "button", onClick: () => {
+                                setTotalSpokenSeconds(0);
+                                if (user && db) {
+                                    const todayId = getTodayStorageKey();
+                                    setDoc(doc(db, "artifacts", appId, "users", user.uid, "daily_stats", todayId), { seconds: 0, updatedAt: Date.now() }).catch(() => { });
+                                }
+                            }, className: "text-xs font-bold bg-slate-950 text-slate-400 hover:text-red-300 border border-slate-800 px-3 py-1.5 rounded-xl flex items-center gap-1" },
+                            React.createElement(RotateCcw, { className: "w-3.5 h-3.5" }),
+                            React.createElement("span", null, "\u062A\u0635\u0641\u064A\u0631 \u0639\u062F\u0627\u062F \u0627\u0644\u064A\u0648\u0645")),
+                        React.createElement("button", { type: "button", onClick: () => {
+                                setShowSpeakingTimerModal(false);
+                                if (micMode === "off")
+                                    startLiveSpeech("de");
+                            }, className: "bg-amber-400 text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs flex items-center gap-1" },
+                            React.createElement(Mic, { className: "w-3.5 h-3.5" }),
+                            React.createElement("span", null, "\u0627\u0628\u062F\u0623 \u0627\u0644\u0643\u0644\u0627\u0645 \u0627\u0644\u0622\u0646")))))),
+
+            showGoogleSitesModal && (React.createElement("div", { className: "fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" },
+                React.createElement("div", { className: "bg-slate-900 border-2 border-indigo-500/60 rounded-3xl w-full max-w-2xl p-4 sm:p-6 shadow-2xl space-y-4" },
+                    React.createElement("div", { className: "flex items-center justify-between border-b border-slate-800 pb-3" },
+                        React.createElement("h2", { className: "text-base font-extrabold text-white flex items-center gap-2" },
+                            React.createElement(Globe, { className: "w-5 h-5 text-indigo-400" }),
+                            React.createElement("span", null, "\u062A\u0636\u0645\u064A\u0646 \u0627\u0644\u0645\u0648\u0642\u0639 \u0641\u064A Google Sites")),
+                        React.createElement("button", { type: "button", onClick: () => setShowGoogleSitesModal(false), className: "bg-slate-800 text-slate-300 p-1.5 rounded-xl" },
+                            React.createElement(X, { className: "w-5 h-5" }))),
+                    React.createElement("div", { className: "bg-slate-950 border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-2" },
+                        React.createElement("span", { className: "text-xs text-slate-300" }, "\u0627\u0646\u0633\u062E \u0627\u0644\u0643\u0648\u062F \u0648\u0627\u0644\u0635\u0642\u0647 \u0641\u064A Google Sites \u062F\u0627\u062E\u0644 \u062A\u0628\u0648\u064A\u0628 Embed Code:"),
+                        React.createElement("button", { type: "button", onClick: copyGoogleSitesCode, className: "px-4 py-2 rounded-xl font-extrabold text-xs bg-amber-400 text-slate-950 flex items-center gap-1.5 shrink-0" },
+                            React.createElement(Copy, { className: "w-4 h-4" }),
+                            React.createElement("span", null, copiedEmbed ? "تم النسخ! ✓" : "نسخ الكود")))))))));
+}
+
+import { createRoot } from 'react-dom/client';
+createRoot(document.getElementById('root')).render(React.createElement(App));
+  </script>
+</body>
+</html>
